@@ -836,7 +836,28 @@ function renderBrandChips(){
 }
 
 // ---- Overpass discovery ---------------------------------------------------
-var OVERPASS="https://overpass-api.de/api/interpreter";
+var OVERPASS_ENDPOINTS=[
+ "https://overpass-api.de/api/interpreter",
+ "https://overpass.kumi.systems/api/interpreter",
+ "https://overpass.private.coffee/api/interpreter"
+];
+// Try each mirror in turn; retry the next on 429 (rate limit) / 5xx / network.
+function fetchOverpass(q,idx){
+  idx=idx||0;
+  if(idx>=OVERPASS_ENDPOINTS.length)
+    return Promise.reject(new Error("alle OpenStreetMap-Server gerade ausgelastet – bitte kurz warten oder Gebiet verkleinern."));
+  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(q)})
+   .then(function(r){
+     if(r.status===429||r.status===504||r.status>=500)throw new Error("__retry__");
+     if(!r.ok)throw new Error("Overpass HTTP "+r.status);
+     return r.json();
+   })
+   .catch(function(e){
+     if(e.message==="__retry__"||e.name==="TypeError") // rate-limited / busy / network -> next mirror
+       return new Promise(function(res){setTimeout(res,700);}).then(function(){return fetchOverpass(q,idx+1);});
+     throw e;
+   });
+}
 function classify(t){
   if(t.aeroway==="aerodrome")return"Flughafen";
   if(t.railway==="station"||t.railway==="halt")return"Bahnhof";
@@ -857,14 +878,26 @@ function buildQuery(bbox){
 }
 function searchPois(){
   var b=map.getBounds();
+  var el=$("result");
+  var q=buildQuery(null);
+  if(!q){toast("Bitte mind. eine Kategorie oder Marke wählen.","warn");return;}
+  // Guard against over-large areas (the public Overpass API can't serve them).
+  // Brand-only searches are sparse, so they're allowed a larger area.
+  var latSpan=b.getNorth()-b.getSouth(),lngSpan=b.getEast()-b.getWest();
+  var hasCat=CATEGORIES.some(function(c){return State.cats[c.key];});
+  var latLim=hasCat?2.0:5.0,lngLim=hasCat?3.0:7.0;
+  if(latSpan>latLim||lngSpan>lngLim){
+    el.className="result warn";
+    el.textContent="Gebiet zu groß – bitte näher heranzoomen (Stadt-/Bezirksebene), dann erneut suchen.";
+    toast("Bitte näher heranzoomen – das Gebiet ist für eine Live-Abfrage zu groß.","warn");
+    return;
+  }
   // Overpass bbox order: south,west,north,east
   var bbox=b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5);
-  var q=buildQuery(bbox);
-  if(!q){toast("Bitte mind. eine Kategorie oder Marke wählen.","warn");return;}
-  var el=$("result");el.className="result";el.textContent="Suche bei OpenStreetMap …";
+  q=buildQuery(bbox);
+  el.className="result";el.textContent="Suche bei OpenStreetMap …";
   setStatus("Overpass-Abfrage läuft …");
-  fetch(OVERPASS,{method:"POST",body:"data="+encodeURIComponent(q)})
-   .then(function(r){if(!r.ok)throw new Error("Overpass HTTP "+r.status);return r.json();})
+  fetchOverpass(q)
    .then(function(data){
      var pois=[];
      (data.elements||[]).forEach(function(e){
@@ -878,7 +911,7 @@ function searchPois(){
      setStatus("Bereit · "+fmt(pois.length)+" POIs");
      refreshButtons();
    })
-   .catch(function(err){el.className="result err";el.textContent="Overpass-Fehler: "+(err.message||err)+" – evtl. Gebiet verkleinern.";setStatus("Bereit");});
+   .catch(function(err){el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
 }
 
 function renderPois(){
