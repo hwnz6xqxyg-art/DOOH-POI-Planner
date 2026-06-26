@@ -817,7 +817,9 @@ var State={brands:[],cats:{},globalRadius:500,pois:[],anchors:{},screens:[],hidd
 var idbOK=false;
 
 // ---- map ------------------------------------------------------------------
-var map=L.map("map",{preferCanvas:true}).setView([51.1,10.4],6);
+// doubleClickZoom off so a quick second click on a POI reliably toggles it off
+// (instead of being swallowed as a map zoom). Zoom via scroll / +/- buttons.
+var map=L.map("map",{preferCanvas:true,doubleClickZoom:false}).setView([51.1,10.4],6);
 L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
   {attribution:"&copy; OpenStreetMap &copy; CARTO",subdomains:"abcd",maxZoom:19}).addTo(map);
 var poiLayer=L.layerGroup().addTo(map),circleLayer=L.layerGroup().addTo(map),screenLayer=L.layerGroup().addTo(map);
@@ -938,20 +940,12 @@ function renderPois(){
   poiLayer.clearLayers();poiMk={};
   State.pois.forEach(function(p){
     var m=L.circleMarker([p.lat,p.lng],State.anchors[p.id]?POI_ANCHOR:POI_BASE);
-    m.bindPopup(function(){return poiPopup(p);});m.on("click",function(){toggleAnchor(p);});
+    // Hover tooltip for the name (non-blocking); a left-click toggles the anchor
+    // on/off. No popup, so a second click on a selected point reliably removes it.
+    m.bindTooltip(esc(p.name)+(p.brand?" · "+esc(p.brand):""),{direction:"top",opacity:.95});
+    m.on("click",function(){toggleAnchor(p);});
     poiLayer.addLayer(m);poiMk[p.id]=m;
   });
-}
-function poiPopup(p){
-  var wrap=document.createElement("div"),isA=!!State.anchors[p.id];
-  wrap.innerHTML='<strong>'+esc(p.name)+'</strong><div class="pp-meta">'+esc(p.cat)+(p.brand?" · "+esc(p.brand):"")+'</div>';
-  var btn=document.createElement("button");btn.className="btn sm";btn.textContent=isA?"Anker entfernen":"Als Anker";
-  btn.onclick=function(){toggleAnchor(p);map.closePopup();};wrap.appendChild(btn);
-  if(isA){var r=radiusOf(p.id);var row=document.createElement("div");row.className="pp-meta";row.style.marginTop="8px";
-    row.innerHTML='Radius <b class="rv">'+r+'</b> m';var sl=document.createElement("input");sl.type="range";sl.min="50";sl.max="5000";sl.step="50";sl.value=r;sl.className="pp-radius";
-    sl.oninput=function(){var v=parseInt(sl.value,10);State.anchors[p.id].radius=v;row.querySelector(".rv").textContent=v;drawCircles();doMatch();};
-    wrap.appendChild(row);wrap.appendChild(sl);}
-  return wrap;
 }
 function toggleAnchor(p){
   if(State.anchors[p.id])delete State.anchors[p.id];else State.anchors[p.id]={radius:null,p:p};
@@ -961,7 +955,7 @@ function toggleAnchor(p){
 function drawCircles(){
   circleLayer.clearLayers();circleMk={};
   Object.keys(State.anchors).forEach(function(id){var a=State.anchors[id],p=a.p||findPoi(id);if(!p)return;
-    var c=L.circle([p.lat,p.lng],{radius:radiusOf(id),color:"#e20074",weight:1,fillOpacity:.06});circleLayer.addLayer(c);circleMk[id]=c;});
+    var c=L.circle([p.lat,p.lng],{radius:radiusOf(id),color:"#e20074",weight:1,fillOpacity:.06,interactive:false});circleLayer.addLayer(c);circleMk[id]=c;});
 }
 function findPoi(id){for(var i=0;i<State.pois.length;i++)if(State.pois[i].id===id)return State.pois[i];return null;}
 
