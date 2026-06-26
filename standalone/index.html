@@ -728,7 +728,7 @@ input[type=text]:focus{border-color:var(--accent)}
       <div class="row"><input id="brandInput" type="text" placeholder="z. B. Rossmann" style="flex:1" />
         <button id="brandAdd" class="btn sm">+</button></div>
       <div id="brandChips" class="chips"></div>
-      <div class="hint">Für <b>nur bestimmte Marken</b>: hier Marken hinzufügen und <b>keine Kategorie</b> anhaken. Marken &amp; Kategorien werden zusammengeführt (ODER).</div>
+      <div class="hint"><b>Nur Marken</b> (keine Kategorie) = alle Filialen dieser Marken. <b>Marke + Kategorie</b> = nur diese Marke in dieser Kategorie (z. B. Drogerie + Müller = nur Müller-Drogerien, keine Bäckerei/Molkerei).</div>
     </div>
     <div class="block">
       <label class="lbl">Kategorien <span style="text-transform:none;color:var(--muted)">(= alle Filialen dieser Art)</span></label>
@@ -884,9 +884,19 @@ function classify(t){
 }
 function buildQuery(scope){
   var ref=scope.type==="country"?"(area.sa)":"("+scope.bbox+")";
+  var cats=CATEGORIES.filter(function(c){return State.cats[c.key];});
+  var brands=State.brands;
+  var bf=function(b){return '["brand"~"'+b.replace(/"/g,'')+'",i]';};
   var parts=[];
-  CATEGORIES.forEach(function(c){if(State.cats[c.key])parts.push('nwr'+c.f+ref+';');});
-  State.brands.forEach(function(b){parts.push('nwr["brand"~"'+b.replace(/"/g,'')+'",i]'+ref+';');});
+  if(cats.length&&brands.length){
+    // AND: only this brand within this category (e.g. Drogerie + Müller =
+    // only Müller drugstores) — one filter per category×brand pair.
+    cats.forEach(function(c){brands.forEach(function(b){parts.push('nwr'+c.f+bf(b)+ref+';');});});
+  }else if(cats.length){
+    cats.forEach(function(c){parts.push('nwr'+c.f+ref+';');});
+  }else{
+    brands.forEach(function(b){parts.push('nwr'+bf(b)+ref+';');});
+  }
   if(!parts.length)return null;
   var to=scope.type==="country"?180:40,lim=scope.type==="country"?50000:3000;
   var pre=scope.type==="country"?'area["ISO3166-1"="'+scope.cc+'"][admin_level=2]->.sa;':'';
@@ -934,13 +944,15 @@ function searchPois(){
   fetchOverpass(q)
    .then(function(data){
      var seen={},pois=[];
-     var selLabels={};CATEGORIES.forEach(function(c){if(State.cats[c.key])selLabels[c.label]=1;});
-     var terms=State.brands;
+     var selLabels={},hasCat=false;CATEGORIES.forEach(function(c){if(State.cats[c.key]){selLabels[c.label]=1;hasCat=true;}});
+     var terms=State.brands,hasBrand=terms.length>0;
      (data.elements||[]).forEach(function(e){
        var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
        if(lat==null||lng==null)return;var t=e.tags||{};var cat=classify(t);
-       // keep only genuine matches: a selected category, or a whole-word brand hit
-       if(!selLabels[cat]&&!brandWholeWord(t.brand,terms))return;
+       var catOk=!!selLabels[cat],brandOk=brandWholeWord(t.brand,terms);
+       // both set -> AND (brand within category); else just the active one
+       var keep=hasCat&&hasBrand?(catOk&&brandOk):(hasCat?catOk:brandOk);
+       if(!keep)return;
        var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;
        pois.push({id:id,name:t.name||t.brand||cat,brand:t.brand||null,cat:cat,lat:lat,lng:lng});
      });
