@@ -892,6 +892,19 @@ function buildQuery(scope){
   var pre=scope.type==="country"?'area["ISO3166-1"="'+scope.cc+'"][admin_level=2]->.sa;':'';
   return "[out:json][timeout:"+to+"];"+pre+"("+parts.join("")+");out center tags "+lim+";";
 }
+// Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
+// value, so a short brand like "dm" doesn't match substrings ("A-dm-iral").
+function escapeRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
+function brandWholeWord(brand,terms){
+  if(!brand||!terms.length)return false;
+  var b=String(brand).toLowerCase();
+  for(var i=0;i<terms.length;i++){
+    var t=String(terms[i]).toLowerCase().trim();if(!t)continue;
+    try{if(new RegExp("(^|[^\\p{L}])"+escapeRe(t)+"([^\\p{L}]|$)","u").test(b))return true;}
+    catch(e){if(b===t)return true;} // fallback: exact match if \p{L} unsupported
+  }
+  return false;
+}
 function searchPois(){
   var el=$("result");
   var scopeVal=$("scope").value;
@@ -921,10 +934,15 @@ function searchPois(){
   fetchOverpass(q)
    .then(function(data){
      var seen={},pois=[];
+     var selLabels={};CATEGORIES.forEach(function(c){if(State.cats[c.key])selLabels[c.label]=1;});
+     var terms=State.brands;
      (data.elements||[]).forEach(function(e){
        var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
-       if(lat==null||lng==null)return;var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;var t=e.tags||{};
-       pois.push({id:id,name:t.name||t.brand||classify(t),brand:t.brand||null,cat:classify(t),lat:lat,lng:lng});
+       if(lat==null||lng==null)return;var t=e.tags||{};var cat=classify(t);
+       // keep only genuine matches: a selected category, or a whole-word brand hit
+       if(!selLabels[cat]&&!brandWholeWord(t.brand,terms))return;
+       var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;
+       pois.push({id:id,name:t.name||t.brand||cat,brand:t.brand||null,cat:cat,lat:lat,lng:lng});
      });
      State.pois=pois;renderPois();drawCircles();
      if(pois.length&&scope.type==="country"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
