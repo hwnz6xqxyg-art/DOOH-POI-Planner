@@ -12,6 +12,11 @@ build:
 logs:
 	docker compose logs -f api
 
+# Quick smoke test: import the bundled 5-POI sample fixture (no download).
+etl-sample:
+	cp api/tests/sample.osm data/sample.osm
+	docker compose run --rm etl --pbf /data/sample.osm --country de
+
 # OSM imports — drop the extracts in ./data first (Geofabrik .osm.pbf).
 etl-de:
 	docker compose run --rm etl --pbf /data/germany-latest.osm.pbf --country de

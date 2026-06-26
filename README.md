@@ -26,16 +26,21 @@ Runs locally, single user, no auth (SPEC §12). `docker compose up` on one machi
 
 ## Quick start
 
+**Prerequisite: Docker Desktop must be installed and running** (`docker --version` should
+work). On macOS: `brew install --cask docker` then launch Docker Desktop, or download it from
+<https://www.docker.com/products/docker-desktop>.
+
 ```bash
 # 1. start the stack (db + api + web) on localhost
 make up                      # == docker compose up -d --build
 
-# 2. load OSM POIs — download Geofabrik extracts into ./data first, e.g.
-#    https://download.geofabrik.de/europe/germany-latest.osm.pbf  -> ./data/
-make etl-de                  # repeat: make etl-at / make etl-ch
+# 2a. quick smoke test — import the bundled 5-POI sample (no download)
+make etl-sample
+open http://localhost:8080   # you should see 5 POIs; search + select to match
 
-# 3. open the app
-open http://localhost:8080
+# 2b. real data — download Geofabrik extracts into ./data first, e.g.
+#     https://download.geofabrik.de/europe/germany-latest.osm.pbf  -> ./data/
+make etl-de                  # repeat: make etl-at / make etl-ch
 ```
 
 Upload a DOOH inventory file (`.xlsx`/`.csv`) in the right panel (Ströer & WallDecaux/VIOOH
