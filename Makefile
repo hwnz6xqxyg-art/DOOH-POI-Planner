@@ -1,5 +1,10 @@
-.PHONY: up down build logs etl-de etl-at etl-ch test
+.PHONY: local up down build logs etl-sample etl-de etl-at etl-ch test
 
+# ---- No-Docker (macOS native) --------------------------------------------
+local:         ## set up + run everything natively (no Docker) on :8000
+	./scripts/run-local.sh
+
+# ---- Docker ---------------------------------------------------------------
 up:            ## build + start the full stack (db, api, web) on localhost
 	docker compose up -d --build
 

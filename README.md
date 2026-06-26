@@ -48,7 +48,29 @@ column layouts auto-detect; confirm the mapping). Then discover POIs on the left
 category / area / attribute), click POIs to make them anchors, set the radius, and export the
 screens in range.
 
-## Development (without Docker)
+## Run without Docker (macOS) — recommended if Docker is giving you grief
+
+One command sets up PostGIS + Python + Node via Homebrew, loads the sample POIs,
+and serves the whole app (API **and** UI) on a single port:
+
+```bash
+make local            # == ./scripts/run-local.sh
+open http://localhost:8000
+```
+
+It's re-runnable (skips anything already done). Requires [Homebrew](https://brew.sh);
+it installs `postgis`, `python@3.11`, and `node` for you and starts PostgreSQL via
+`brew services`. Stop the app with Ctrl+C (PostgreSQL keeps running as a brew service —
+`brew services stop postgresql@<v>` to stop it).
+
+Load real OSM data after the first run:
+
+```bash
+# download e.g. https://download.geofabrik.de/europe/germany-latest.osm.pbf
+./scripts/etl-local.sh ~/Downloads/germany-latest.osm.pbf de    # then at / ch
+```
+
+## Development (without Docker, manual)
 
 ```bash
 # Postgres 16 + PostGIS reachable as DATABASE_URL; then:
