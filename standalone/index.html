@@ -733,7 +733,17 @@ input[type=text]:focus{border-color:var(--accent)}
       <label class="lbl">Kategorien</label>
       <div id="cats" class="cats"></div>
     </div>
-    <button id="searchBtn" class="btn primary full">POIs im Kartenausschnitt suchen</button>
+    <div class="block">
+      <label class="lbl">Gebiet</label>
+      <select id="scope" style="width:100%;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text)">
+        <option value="view">Kartenausschnitt</option>
+        <option value="DE">Ganz Deutschland</option>
+        <option value="AT">Ganz Österreich</option>
+        <option value="CH">Ganze Schweiz</option>
+      </select>
+      <div class="hint">Für ganz DE/AT/CH am besten nur Marken wählen (z. B. dm, Rossmann) – Kategorien können landesweit zu groß sein.</div>
+    </div>
+    <button id="searchBtn" class="btn primary full">POIs suchen</button>
     <div id="result" class="result"></div>
     <div class="row">
       <button id="selectAll" class="btn sm" disabled>Alle als Anker</button>
@@ -869,45 +879,54 @@ function classify(t){
   if(t.shop==="mall"||t.shop==="department_store")return"Einkaufszentrum";
   return t.shop||t.amenity||t.leisure||"POI";
 }
-function buildQuery(bbox){
+function buildQuery(scope){
+  var ref=scope.type==="country"?"(area.sa)":"("+scope.bbox+")";
   var parts=[];
-  CATEGORIES.forEach(function(c){if(State.cats[c.key])parts.push('nwr'+c.f+'('+bbox+');');});
-  State.brands.forEach(function(b){parts.push('nwr["brand"~"'+b.replace(/"/g,'')+'",i]('+bbox+');');});
+  CATEGORIES.forEach(function(c){if(State.cats[c.key])parts.push('nwr'+c.f+ref+';');});
+  State.brands.forEach(function(b){parts.push('nwr["brand"~"'+b.replace(/"/g,'')+'",i]'+ref+';');});
   if(!parts.length)return null;
-  return "[out:json][timeout:40];("+parts.join("")+");out center tags 3000;";
+  var to=scope.type==="country"?180:40,lim=scope.type==="country"?50000:3000;
+  var pre=scope.type==="country"?'area["ISO3166-1"="'+scope.cc+'"][admin_level=2]->.sa;':'';
+  return "[out:json][timeout:"+to+"];"+pre+"("+parts.join("")+");out center tags "+lim+";";
 }
 function searchPois(){
-  var b=map.getBounds();
   var el=$("result");
-  var q=buildQuery(null);
-  if(!q){toast("Bitte mind. eine Kategorie oder Marke wählen.","warn");return;}
-  // Guard against over-large areas (the public Overpass API can't serve them).
-  // Brand-only searches are sparse, so they're allowed a larger area.
-  var latSpan=b.getNorth()-b.getSouth(),lngSpan=b.getEast()-b.getWest();
+  var scopeVal=$("scope").value;
   var hasCat=CATEGORIES.some(function(c){return State.cats[c.key];});
-  var latLim=hasCat?2.0:5.0,lngLim=hasCat?3.0:7.0;
-  if(latSpan>latLim||lngSpan>lngLim){
-    el.className="result warn";
-    el.textContent="Gebiet zu groß – bitte näher heranzoomen (Stadt-/Bezirksebene), dann erneut suchen.";
-    toast("Bitte näher heranzoomen – das Gebiet ist für eine Live-Abfrage zu groß.","warn");
-    return;
+  var hasBrand=State.brands.length>0;
+  if(!hasCat&&!hasBrand){toast("Bitte mind. eine Kategorie oder Marke wählen.","warn");return;}
+  var scope;
+  if(scopeVal==="view"){
+    var b=map.getBounds();
+    // Guard against over-large bbox queries (the public API can't serve them).
+    var latSpan=b.getNorth()-b.getSouth(),lngSpan=b.getEast()-b.getWest();
+    var latLim=hasCat?2.0:5.0,lngLim=hasCat?3.0:7.0;
+    if(latSpan>latLim||lngSpan>lngLim){
+      el.className="result warn";
+      el.textContent="Gebiet zu groß – näher heranzoomen, oder oben „Ganz Deutschland“ wählen (für Marken).";
+      toast("Bitte näher heranzoomen oder ein ganzes Land als Gebiet wählen.","warn");return;
+    }
+    scope={type:"bbox",bbox:b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5)};
+  }else{
+    scope={type:"country",cc:scopeVal};
+    if(hasCat)toast("Hinweis: Kategorien landesweit können sehr groß/langsam sein – am besten nur Marken.","warn");
   }
-  // Overpass bbox order: south,west,north,east
-  var bbox=b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5);
-  q=buildQuery(bbox);
-  el.className="result";el.textContent="Suche bei OpenStreetMap …";
+  var q=buildQuery(scope);
+  el.className="result";
+  el.textContent=scope.type==="country"?"Landesweite Suche – das kann 10–60 s dauern …":"Suche bei OpenStreetMap …";
   setStatus("Overpass-Abfrage läuft …");
   fetchOverpass(q)
    .then(function(data){
-     var pois=[];
+     var seen={},pois=[];
      (data.elements||[]).forEach(function(e){
        var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
-       if(lat==null||lng==null)return;var t=e.tags||{};
-       pois.push({id:e.type+"/"+e.id,name:t.name||t.brand||classify(t),brand:t.brand||null,cat:classify(t),lat:lat,lng:lng});
+       if(lat==null||lng==null)return;var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;var t=e.tags||{};
+       pois.push({id:id,name:t.name||t.brand||classify(t),brand:t.brand||null,cat:classify(t),lat:lat,lng:lng});
      });
      State.pois=pois;renderPois();drawCircles();
+     if(pois.length&&scope.type==="country"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
      el.className="result "+(pois.length?"ok":"warn");
-     el.textContent=pois.length?(fmt(pois.length)+" POIs gefunden"):"Keine POIs in diesem Ausschnitt.";
+     el.textContent=pois.length?(fmt(pois.length)+" POIs gefunden"):"Keine POIs gefunden.";
      setStatus("Bereit · "+fmt(pois.length)+" POIs");
      refreshButtons();
    })
