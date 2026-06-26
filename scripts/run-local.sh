@@ -25,15 +25,32 @@ brew list python@3.11 >/dev/null 2>&1 || brew install python@3.11 || die "brew i
 brew list node        >/dev/null 2>&1 || brew install node        || die "brew install node failed."
 
 # --- 2. PostgreSQL/PostGIS service -----------------------------------------
-# Find the postgresql formula PostGIS is built against (its bin has the matching
-# psql + the postgis extension).
-say "Locating the PostgreSQL that PostGIS uses…"
-PGF="$(brew deps postgis 2>/dev/null | grep -E '^postgresql(@[0-9.]+)?$' | tail -1)"
-[ -z "$PGF" ] && PGF="$(brew list --formula 2>/dev/null | grep -E '^postgresql(@[0-9.]+)?$' | sort -V | tail -1)"
-[ -z "$PGF" ] && PGF="postgresql@16"
-echo "   → $PGF"
-PGBIN="$(brew --prefix "$PGF" 2>/dev/null)/bin"
-[ -x "$PGBIN/psql" ] || die "psql not found for $PGF (looked in $PGBIN). Try: brew reinstall $PGF"
+# Find the actual psql on disk. Prefer the PostgreSQL whose extension dir has
+# postgis.control (authoritative: that's the one PostGIS is installed into),
+# else any Homebrew PostgreSQL. Avoids brittle parsing of brew output.
+pick_pg() {
+  local cand share
+  for cand in /opt/homebrew/opt/postgresql@*/bin /opt/homebrew/opt/postgresql/bin \
+              /usr/local/opt/postgresql@*/bin /usr/local/opt/postgresql/bin; do
+    [ -x "$cand/psql" ] || continue
+    share="$("$cand/pg_config" --sharedir 2>/dev/null)"
+    [ -n "$share" ] && [ -f "$share/extension/postgis.control" ] && { echo "$cand"; return 0; }
+  done
+  for cand in /opt/homebrew/opt/postgresql@*/bin /opt/homebrew/opt/postgresql/bin \
+              /usr/local/opt/postgresql@*/bin /usr/local/opt/postgresql/bin; do
+    [ -x "$cand/psql" ] && { echo "$cand"; return 0; }
+  done
+  return 1
+}
+say "Locating PostgreSQL (with PostGIS)…"
+PGBIN="$(pick_pg || true)"
+if [ -z "$PGBIN" ]; then
+  brew install postgis || die "brew install postgis failed."   # pulls the right postgresql
+  PGBIN="$(pick_pg || true)"
+fi
+[ -n "$PGBIN" ] && [ -x "$PGBIN/psql" ] || die "Could not find a Homebrew PostgreSQL on disk. Try: brew install postgis"
+PGF="$(basename "$(dirname "$PGBIN")")"   # keg dir name, e.g. postgresql@14
+echo "   → $PGF ($PGBIN)"
 
 say "Starting $PGF…"
 brew services start "$PGF" >/dev/null 2>&1 || true
