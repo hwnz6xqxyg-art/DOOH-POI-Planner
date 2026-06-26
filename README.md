@@ -13,6 +13,39 @@ draw-an-area, attribute filters). Geography: **DACH (DE/AT/CH)**.
 > Full specification: **[`SPEC.md`](./SPEC.md)**. Donor tool kept under
 > [`reference/`](./reference/) for the reused plumbing.
 
+## Two ways to run it
+
+**A. Standalone — no install, just double-click.** Open
+**[`standalone/index.html`](./standalone/index.html)** in your browser (double-click it in
+Finder). No Docker, no Postgres, no terminal. It discovers POIs live from the OpenStreetMap
+**Overpass API** and does everything (upload, matching, export) in the browser. This is the
+easiest path and what most people want — see **[Standalone](#standalone-double-click)** below.
+
+**B. Full stack (PostGIS backend).** For nationwide bulk OSM data and server-side matching,
+run the FastAPI + PostGIS stack via Docker or natively — see [Architecture](#architecture)
+and the run sections further down.
+
+| | Standalone (A) | Full stack (B) |
+|---|---|---|
+| Setup | none — open a file | Docker **or** Homebrew/Postgres |
+| POI data | live Overpass, per map view | whole DACH pre-imported (Geofabrik) |
+| Matching | in browser | PostGIS `ST_DWithin` |
+| Best for | getting going, single campaigns | large/repeated nationwide planning |
+
+## Standalone (double-click)
+
+1. Open `standalone/index.html` in a browser (double-click in Finder, or drag it onto the
+   browser). Needs internet for the map + OpenStreetMap queries.
+2. **Upload your DOOH inventory** (right panel) — any `.xlsx`/`.csv` with ID + lat/lng
+   columns; Ströer/WallDecaux layouts auto-detect, confirm the mapping.
+3. **Discover POIs** (left panel): zoom the map to your target area, tick categories and/or
+   add brands (e.g. *Rossmann*), then **"POIs im Kartenausschnitt suchen"**.
+4. Click POIs to make them **anchors** (or "Alle als Anker"), set the radius, and the plan
+   card shows screens in range + coverage. **Export CSV** for the matched screens.
+
+It's a single self-contained file (Leaflet is inlined). Inventory persists in the browser
+when possible; opened via `file://` it may be session-only, which is fine for one-off planning.
+
 ## Architecture
 
 Runs locally, single user, no auth (SPEC §12). `docker compose up` on one machine.
