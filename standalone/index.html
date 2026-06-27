@@ -846,12 +846,16 @@ var map=L.map("map",{preferCanvas:true}).setView([51.1,10.4],6);   // double-cli
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   {attribution:"&copy; OpenStreetMap &copy; CARTO",subdomains:"abcd",maxZoom:19}).addTo(map);
 // Coloured cluster bubbles with a count; markers split apart as you zoom in.
-function clusterIcon(bg,fg){return function(cl){var n=cl.getChildCount(),s=n<25?32:n<200?40:n<2000?48:56;
+// dir<0 shifts the bubble up-left of its point, dir>0 down-right — by (half size
+// + pad) so a POI bubble and a screen bubble at the same place never overlap
+// (the true location sits in the small gap between them).
+function clusterIcon(bg,fg,dir){return function(cl){var n=cl.getChildCount(),s=n<25?32:n<200?40:n<2000?48:56;
   var label=n>=1000?(n/1000).toFixed(n<10000?1:0).replace(".0","")+"k":n;
-  return L.divIcon({html:'<div style="background:'+bg+';color:'+fg+';width:'+s+'px;height:'+s+'px;line-height:'+s+'px;border-radius:50%;text-align:center;font-weight:600;font-size:12px;border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 5px rgba(0,0,0,.35)">'+label+'</div>',className:'',iconSize:[s,s]});};}
+  var pad=4,off=dir<0?s+pad:-pad;
+  return L.divIcon({html:'<div style="background:'+bg+';color:'+fg+';width:'+s+'px;height:'+s+'px;line-height:'+s+'px;border-radius:50%;text-align:center;font-weight:600;font-size:12px;border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 5px rgba(0,0,0,.35)">'+label+'</div>',className:'',iconSize:[s,s],iconAnchor:[off,off]});};}
 var CL_OPTS={chunkedLoading:true,showCoverageOnHover:false,maxClusterRadius:60,spiderfyOnMaxZoom:true};
-var poiLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#1a1a1a","#fff")},CL_OPTS)).addTo(map);     // POIs: black bubbles
-var screenLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#b8932f","#1a1a1a")},CL_OPTS)).addTo(map); // screens: gold bubbles
+var poiLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#1a1a1a","#fff",-1)},CL_OPTS)).addTo(map);     // POIs: black bubbles (up-left)
+var screenLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#b8932f","#1a1a1a",1)},CL_OPTS)).addTo(map); // screens: gold bubbles (down-right)
 var circleLayer=L.layerGroup().addTo(map);
 var poiMk={},screenMk={},circleMk={};
 // L'Oréal coding: POIs/anchors in black, DOOH screens in L'Oréal gold.
