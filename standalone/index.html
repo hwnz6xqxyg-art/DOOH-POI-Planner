@@ -855,6 +855,9 @@ function setStatus(m){$("status").textContent=m;}
 // ---- categories (label -> Overpass tag filter) ----------------------------
 var CATEGORIES=[
  {key:"chemist",label:"Drogerie",f:'["shop"="chemist"]'},
+ {key:"perfumery",label:"Parfümerie",f:'["shop"~"^(perfumery|cosmetics)$"]'},
+ {key:"pharmacy",label:"Apotheke",f:'["amenity"="pharmacy"]'},
+ {key:"hairdresser",label:"Friseure",f:'["shop"="hairdresser"]'},
  {key:"supermarket",label:"Supermarkt",f:'["shop"="supermarket"]'},
  {key:"electronics",label:"Elektronik",f:'["shop"="electronics"]'},
  {key:"clothes",label:"Mode",f:'["shop"="clothes"]'},
@@ -974,6 +977,9 @@ function classify(t){
   if(t.leisure==="fitness_centre")return"Fitnessstudio";
   if(t.amenity==="university"||t.amenity==="college")return"Universität";
   if(t.amenity==="cinema")return"Kino";
+  if(t.amenity==="pharmacy")return"Apotheke";
+  if(t.shop==="perfumery"||t.shop==="cosmetics")return"Parfümerie";
+  if(t.shop==="hairdresser")return"Friseure";
   if(t.shop==="chemist")return"Drogerie";if(t.shop==="supermarket")return"Supermarkt";
   if(t.shop==="electronics")return"Elektronik";if(t.shop==="clothes")return"Mode";
   if(t.shop==="mall"||t.shop==="department_store")return"Einkaufszentrum";
