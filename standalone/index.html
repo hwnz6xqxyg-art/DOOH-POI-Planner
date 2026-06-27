@@ -720,8 +720,15 @@ input[type=text]:focus{border-color:var(--accent)}
 .partner-row.hidden-p{opacity:.45}.partner-row .pdot{width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1}.partner-row .pcount{color:var(--muted);font-size:12px}
 .partner-row .px{background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
 .result{margin:8px 0;font-size:13px;min-height:18px}.result.ok{color:var(--ok)}.result.warn{color:var(--warn)}.result.err{color:var(--err)}
-.plan-card{position:absolute;left:336px;bottom:16px;width:240px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(4px);box-shadow:0 2px 12px rgba(0,0,0,.12);z-index:800}
+.plan-card{position:absolute;left:336px;bottom:16px;width:256px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(4px);box-shadow:0 2px 12px rgba(0,0,0,.12);z-index:800}
 .pc-row{display:flex;justify-content:space-between;padding:3px 0}.pc-row b{color:var(--accent)}.pc-actions{display:flex;gap:6px;margin-top:10px}
+.pc-head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:8px}.pc-head b{color:var(--accent);font-size:14px}
+.radius-presets{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.radius-presets button{flex:1 1 0;min-width:28px;padding:4px 2px;font-size:11px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;cursor:pointer;white-space:nowrap}
+.radius-presets button:hover{border-color:var(--accent)}
+.radius-presets button.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.plan-card input[type=range]{width:100%;margin:2px 0 0}
+.pc-sep{height:1px;background:var(--line);margin:10px 0 6px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:1000}
 .modal.hidden,.hidden{display:none!important}
 .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;width:520px;max-height:85vh;overflow-y:auto}
@@ -738,8 +745,6 @@ input[type=text]:focus{border-color:var(--accent)}
 <body>
 <header id="topbar">
   <div class="brand">DOOH&nbsp;POI&nbsp;Planner</div>
-  <div class="radius-ctl"><label>Radius <b id="radiusVal">100</b> m</label>
-    <input id="globalRadius" type="range" min="50" max="5000" step="50" value="100" /></div>
   <div class="spacer" id="status">Bereit · POIs live aus OpenStreetMap</div>
 </header>
 <div id="layout">
@@ -803,6 +808,12 @@ input[type=text]:focus{border-color:var(--accent)}
   </aside>
 </div>
 <div id="planCard" class="plan-card">
+  <div class="pc-head"><span>Radius</span><b><span id="radiusVal">100</span> m</b></div>
+  <div class="radius-presets" id="radiusPresets">
+    <button data-r="50">50</button><button data-r="100">100</button><button data-r="250">250</button><button data-r="500">500</button><button data-r="1000">1&thinsp;km</button><button data-r="5000">5&thinsp;km</button>
+  </div>
+  <input id="globalRadius" type="range" min="0" max="100" step="1" value="0" />
+  <div class="pc-sep"></div>
   <div class="pc-row"><span>Anker</span><b id="pcAnchors">0</b></div>
   <div class="pc-row"><span>Screens im Radius</span><b id="pcScreens">0</b></div>
   <div class="pc-row"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
@@ -904,6 +915,19 @@ function radiusOf(id){var a=State.anchors[id];return a&&a.radius?a.radius:State.
 // Paint the filled (magenta) portion of a range input up to its current value.
 function paintRange(el){var mn=+el.min||0,mx=+el.max||100,v=+el.value,pct=mx>mn?(v-mn)/(mx-mn)*100:0;
   el.style.background="linear-gradient(to right,var(--accent) "+pct+"%,var(--line) "+pct+"%)";}
+// Radius control: slider position 0..100 maps log-scaled to 50..5000 m, so the
+// small radii used for DOOH (50..500 m) occupy the left HALF of the track.
+function radiusFromPos(pos){var r=50*Math.pow(100,pos/100);
+  if(r<200)r=Math.round(r/10)*10;else if(r<1000)r=Math.round(r/25)*25;else r=Math.round(r/100)*100;
+  return Math.max(50,Math.min(5000,r));}
+function posFromRadius(m){return Math.max(0,Math.min(100,100*Math.log(m/50)/Math.log(100)));}
+function highlightPreset(){var ps=$("radiusPresets");Array.prototype.forEach.call(ps.children,function(b){b.classList.toggle("active",+b.getAttribute("data-r")===State.globalRadius);});}
+function setRadius(m,fromSlider){
+  m=Math.max(50,Math.min(5000,Math.round(m)));State.globalRadius=m;
+  $("radiusVal").textContent=m;
+  var s=$("globalRadius");if(!fromSlider)s.value=Math.round(posFromRadius(m));
+  paintRange(s);highlightPreset();scheduleUpdate();
+}
 
 // ---- categories UI --------------------------------------------------------
 function renderCats(){
@@ -1276,8 +1300,9 @@ function idbLoad(){return idbOpen().then(function(db){return new Promise(functio
 // ---- buttons / wiring -----------------------------------------------------
 function refreshButtons(){$("selectAll").disabled=State.pois.length===0;$("clearAnchors").disabled=Object.keys(State.anchors).length===0;}
 function wire(){
-  $("globalRadius").value=State.globalRadius;paintRange($("globalRadius"));
-  $("globalRadius").addEventListener("input",function(e){State.globalRadius=parseInt(e.target.value,10);$("radiusVal").textContent=State.globalRadius;paintRange(e.target);scheduleUpdate();});
+  $("globalRadius").addEventListener("input",function(e){setRadius(radiusFromPos(+e.target.value),true);});
+  Array.prototype.forEach.call($("radiusPresets").children,function(b){b.addEventListener("click",function(){setRadius(+b.getAttribute("data-r"),false);});});
+  setRadius(State.globalRadius,false);          // init slider position + preset highlight
   $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push(v);$("brandInput").value="";renderBrandChips();}});
   $("brandInput").addEventListener("keydown",function(e){if(e.key==="Enter"){$("brandAdd").click();}});
   $("searchBtn").addEventListener("click",searchPois);
