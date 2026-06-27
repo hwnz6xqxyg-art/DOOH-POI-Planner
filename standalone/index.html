@@ -719,6 +719,7 @@ input[type=text]:focus{border-color:var(--accent)}
 .partners{margin-top:8px}.partner-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:5px;cursor:pointer}
 .partner-row.hidden-p{opacity:.45}.partner-row .pdot{width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1}.partner-row .pcount{color:var(--muted);font-size:12px}
 .partner-row .px{background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
+.partner-row .pedit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}.partner-row .pedit:hover{color:var(--accent)}
 .result{margin:8px 0;font-size:13px;min-height:18px}.result.ok{color:var(--ok)}.result.warn{color:var(--warn)}.result.err{color:var(--err)}
 .plan-card{position:absolute;left:336px;bottom:16px;width:256px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(4px);box-shadow:0 2px 12px rgba(0,0,0,.12);z-index:800}
 .pc-row{display:flex;justify-content:space-between;padding:3px 0}.pc-row b{color:var(--accent)}.pc-actions{display:flex;gap:6px;margin-top:10px}
@@ -1165,15 +1166,27 @@ function renderPartners(){
   var c=partnerCounts(),names=Object.keys(c).sort();
   $("invEmpty").style.display=names.length?"none":"";
   $("invTotal").textContent=State.screens.length?(fmt(State.screens.length)+" Screens · "+names.length+" Partner"):"";
-  $("partnerList").innerHTML=names.map(function(p){return '<div class="partner-row'+(State.hidden[p]?" hidden-p":"")+'" data-p="'+esc(p)+'">'+
-    '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(c[p])+'</span><button class="px" title="entfernen">✕</button></div>';}).join("");
+  $("partnerList").innerHTML=names.map(function(p){return '<div class="partner-row'+(State.hidden[p]?" hidden-p":"")+'" data-p="'+esc(p)+'" title="Klick: ein-/ausblenden">'+
+    '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(c[p])+'</span>'+
+    '<button class="pedit" title="umbenennen">✎</button><button class="px" title="entfernen">✕</button></div>';}).join("");
   Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
     var p=row.getAttribute("data-p");
-    row.addEventListener("click",function(e){if(e.target.classList.contains("px"))return;State.hidden[p]=!State.hidden[p];renderPartners();renderScreens();scheduleMatch();});
+    row.addEventListener("click",function(e){if(e.target.closest("button"))return;State.hidden[p]=!State.hidden[p];renderPartners();renderScreens();scheduleMatch();});
+    row.querySelector(".pedit").addEventListener("click",function(e){e.stopPropagation();renamePartner(p);});
     row.querySelector(".px").addEventListener("click",function(e){e.stopPropagation();
       if(!confirm('Partner „'+p+'" entfernen?'))return;State.screens=State.screens.filter(function(s){return s.partner!==p;});delete State.hidden[p];
       idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
   });
+}
+function renamePartner(old){
+  var nw=window.prompt("Liste umbenennen:",old);
+  if(nw==null)return;nw=nw.trim();
+  if(!nw||nw===old)return;
+  if(partnerCounts()[nw]!==undefined){toast('„'+nw+'" existiert bereits – bitte anderen Namen wählen.',"warn");return;}
+  State.screens.forEach(function(s){if(s.partner===old)s.partner=nw;});  // re-key screens to the new name
+  if(State.hidden[old]){delete State.hidden[old];State.hidden[nw]=true;}
+  idbReplaceAll();renderPartners();renderScreens();scheduleMatch();
+  toast('Umbenannt in „'+nw+'"',"ok");
 }
 
 // ---- spreadsheet reader (ported from donor) -------------------------------
