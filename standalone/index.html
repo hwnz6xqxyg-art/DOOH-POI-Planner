@@ -721,7 +721,7 @@ input[type=text]:focus{border-color:var(--accent)}
 .partner-row .px{background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
 .partner-row .pedit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}.partner-row .pedit:hover{color:var(--accent)}
 .result{margin:8px 0;font-size:13px;min-height:18px}.result.ok{color:var(--ok)}.result.warn{color:var(--warn)}.result.err{color:var(--err)}
-.plan-card{position:absolute;left:336px;bottom:16px;width:256px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(4px);box-shadow:0 2px 12px rgba(0,0,0,.12);z-index:800}
+.plan-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:16px}
 .pc-row{display:flex;justify-content:space-between;padding:3px 0}.pc-row b{color:var(--accent)}.pc-actions{display:flex;gap:6px;margin-top:10px}
 .pc-head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:8px}.pc-head b{color:var(--accent);font-size:14px}
 .radius-presets{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
@@ -797,6 +797,18 @@ input[type=text]:focus{border-color:var(--accent)}
   </aside>
   <main id="map"></main>
   <aside id="right" class="panel">
+    <div id="planCard" class="plan-card">
+      <div class="pc-head"><span>Radius</span><b><span id="radiusVal">100</span> m</b></div>
+      <div class="radius-presets" id="radiusPresets">
+        <button data-r="50">50</button><button data-r="100">100</button><button data-r="250">250</button><button data-r="500">500</button><button data-r="1000">1&thinsp;km</button><button data-r="5000">5&thinsp;km</button>
+      </div>
+      <input id="globalRadius" type="range" min="0" max="100" step="1" value="0" />
+      <div class="pc-sep"></div>
+      <div class="pc-row"><span>Anker</span><b id="pcAnchors">0</b></div>
+      <div class="pc-row"><span>Screens im Radius</span><b id="pcScreens">0</b></div>
+      <div class="pc-row"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
+      <div class="pc-actions"><button id="exportBtn" class="btn sm primary" disabled>Export CSV</button></div>
+    </div>
     <h2>DOOH-Inventar</h2>
     <div class="sub">Eigene Screen-Liste hochladen.</div>
     <div class="block">
@@ -807,18 +819,6 @@ input[type=text]:focus{border-color:var(--accent)}
     </div>
     <div class="hint" id="persistNote"></div>
   </aside>
-</div>
-<div id="planCard" class="plan-card">
-  <div class="pc-head"><span>Radius</span><b><span id="radiusVal">100</span> m</b></div>
-  <div class="radius-presets" id="radiusPresets">
-    <button data-r="50">50</button><button data-r="100">100</button><button data-r="250">250</button><button data-r="500">500</button><button data-r="1000">1&thinsp;km</button><button data-r="5000">5&thinsp;km</button>
-  </div>
-  <input id="globalRadius" type="range" min="0" max="100" step="1" value="0" />
-  <div class="pc-sep"></div>
-  <div class="pc-row"><span>Anker</span><b id="pcAnchors">0</b></div>
-  <div class="pc-row"><span>Screens im Radius</span><b id="pcScreens">0</b></div>
-  <div class="pc-row"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
-  <div class="pc-actions"><button id="exportBtn" class="btn sm primary" disabled>Export CSV</button></div>
 </div>
 <div id="mapModal" class="modal hidden"><div class="modal-box">
   <h3>Inventar – Spalten zuordnen</h3>
