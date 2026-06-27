@@ -997,15 +997,21 @@ function searchPois(){
   }).catch(function(err){el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
 }
 
+// Shared, lazy marker interactions: ONE tooltip + ONE popup built on demand, and
+// reused handler refs (no per-marker closures/objects) — much lighter at scale.
+var sharedTip=L.tooltip({direction:"top",opacity:.95});
+function poiOver(e){var p=e.target._poi;if(!p)return;sharedTip.setLatLng(e.latlng).setContent(esc(p.name)+(p.brand?" · "+esc(p.brand):""));map.openTooltip(sharedTip);}
+function poiOut(){map.closeTooltip(sharedTip);}
+function poiClick(e){var p=e.target._poi;if(p)toggleAnchor(p);}
+function screenClick(e){var s=e.target._s;if(!s)return;
+  L.popup().setLatLng(e.latlng).setContent('<strong>'+esc(s.name||s.screenId)+'</strong><div class="pp-meta">'+esc(s.partner)+" · "+esc(s.screenId)+(s.format?" · "+esc(s.format):"")+'</div>').openOn(map);}
 function renderPois(){
   poiLayer.clearLayers();poiMk={};poiById={};
   State.pois.forEach(function(p){
     poiById[p.id]=p;
     var m=L.circleMarker([p.lat,p.lng],State.anchors[p.id]?POI_ANCHOR:POI_BASE);
-    // Hover tooltip for the name (non-blocking); a left-click toggles the anchor
-    // on/off. No popup, so a second click on a selected point reliably removes it.
-    m.bindTooltip(esc(p.name)+(p.brand?" · "+esc(p.brand):""),{direction:"top",opacity:.95});
-    m.on("click",function(){toggleAnchor(p);});
+    m._poi=p;                                  // hover shows name via the shared tooltip; click toggles
+    m.on("mouseover",poiOver).on("mouseout",poiOut).on("click",poiClick);
     poiLayer.addLayer(m);poiMk[p.id]=m;
   });
 }
@@ -1067,8 +1073,7 @@ function renderScreens(){
   buildScreenIndex();                       // keep the match index in sync
   screenLayer.clearLayers();screenMk={};prevMatched=new Set();
   State.screens.forEach(function(s){if(State.hidden[s.partner])return;var k=s.partner+"||"+s.screenId;
-    var m=L.circleMarker([s.lat,s.lng],SC_BASE);
-    m.bindPopup('<strong>'+esc(s.name||s.screenId)+'</strong><div class="pp-meta">'+esc(s.partner)+" · "+esc(s.screenId)+(s.format?" · "+esc(s.format):"")+'</div>');
+    var m=L.circleMarker([s.lat,s.lng],SC_BASE);m._s=s;m.on("click",screenClick);
     screenLayer.addLayer(m);screenMk[k]=m;});
   applyHighlight();
 }
@@ -1217,8 +1222,8 @@ function wire(){
   $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push(v);$("brandInput").value="";renderBrandChips();}});
   $("brandInput").addEventListener("keydown",function(e){if(e.key==="Enter"){$("brandAdd").click();}});
   $("searchBtn").addEventListener("click",searchPois);
-  $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});renderPois();drawCircles();scheduleMatch();refreshButtons();});
-  $("clearAnchors").addEventListener("click",function(){State.anchors={};renderPois();drawCircles();scheduleMatch();refreshButtons();});
+  $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});for(var id in poiMk)poiMk[id].setStyle(POI_ANCHOR);drawCircles();scheduleMatch();refreshButtons();});
+  $("clearAnchors").addEventListener("click",function(){State.anchors={};for(var id in poiMk)poiMk[id].setStyle(POI_BASE);drawCircles();scheduleMatch();refreshButtons();});
   $("uploadBtn").addEventListener("click",function(){$("fileInput").value="";$("fileInput").click();});
   $("fileInput").addEventListener("change",function(e){var f=e.target.files&&e.target.files[0];if(!f)return;setStatus("Lese „"+f.name+"“ …");
     readSpreadsheet(f).then(function(parsed){parsed.fileName=f.name;if(!parsed.headers.length||!parsed.rows.length){toast("Datei enthält keine Daten.","err");return;}openMapping(parsed);})
