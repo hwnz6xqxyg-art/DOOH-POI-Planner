@@ -761,9 +761,26 @@ input[type=text]:focus{border-color:var(--accent)}
       <label class="lbl">Gebiet</label>
       <select id="scope" style="width:100%;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text)">
         <option value="DE">Ganz Deutschland</option>
-        <option value="view">Kartenausschnitt (Stadt/Region)</option>
+        <option value="Baden-Württemberg">Baden-Württemberg</option>
+        <option value="Bayern">Bayern</option>
+        <option value="Berlin">Berlin</option>
+        <option value="Brandenburg">Brandenburg</option>
+        <option value="Bremen">Bremen</option>
+        <option value="Hamburg">Hamburg</option>
+        <option value="Hessen">Hessen</option>
+        <option value="Mecklenburg-Vorpommern">Mecklenburg-Vorpommern</option>
+        <option value="Niedersachsen">Niedersachsen</option>
+        <option value="Nordrhein-Westfalen">Nordrhein-Westfalen</option>
+        <option value="Rheinland-Pfalz">Rheinland-Pfalz</option>
+        <option value="Saarland">Saarland</option>
+        <option value="Sachsen">Sachsen</option>
+        <option value="Sachsen-Anhalt">Sachsen-Anhalt</option>
+        <option value="Schleswig-Holstein">Schleswig-Holstein</option>
+        <option value="Thüringen">Thüringen</option>
+        <option value="view">Kartenausschnitt (Karte)</option>
       </select>
-      <div class="hint">Ganz Deutschland: am besten nur Marken wählen (z. B. dm, Rossmann) – Kategorien sind landesweit oft zu groß. Für Kategorien (z. B. Flughafen) auf eine Stadt/Region zoomen und „Kartenausschnitt“ wählen.</div>
+      <input id="city" type="text" placeholder="Stadt/Ort (optional), z. B. Hannover" style="margin-top:6px" />
+      <div class="hint">Bundesland + Stadt grenzen die Suche ein (UND mit Marke/Kategorie). Mit Bundesland/Stadt sind auch Kategorien möglich. „Ganz Deutschland“ ohne Eingrenzung: nur Marken. „Kartenausschnitt“ = sichtbarer Kartenbereich.</div>
     </div>
     <button id="searchBtn" class="btn primary full">POIs suchen</button>
     <div id="result" class="result"></div>
@@ -938,10 +955,19 @@ function classify(t){
   return t.shop||t.amenity||t.leisure||"POI";
 }
 function buildQuery(scope){
-  var ref=scope.type==="country"?"(area.sa)":"("+scope.bbox+")";
   var cats=CATEGORIES.filter(function(c){return State.cats[c.key];});
   var brands=State.brands;
   var bf=function(b){return '["brand"~"'+b.replace(/"/g,'')+'",i]';};
+  // Geographic scope: bbox (map view) or admin areas (Bundesland AND city).
+  var pre="",ref="";
+  if(scope.type==="bbox"){ ref="("+scope.bbox+")"; }
+  else{
+    var refs=[];
+    if(scope.bundesland){pre+='area["boundary"="administrative"]["admin_level"="4"]["name"="'+scope.bundesland.replace(/"/g,'')+'"]->.bl;';refs.push("(area.bl)");}
+    if(scope.city){pre+='area["boundary"="administrative"]["name"~"^'+escapeRe(scope.city).replace(/"/g,'')+'$",i]->.ci;';refs.push("(area.ci)");}
+    if(!refs.length){pre+='area["ISO3166-1"="DE"][admin_level=2]->.de;';refs.push("(area.de)");}
+    ref=refs.join("");                          // multiple area filters AND together
+  }
   var parts=[];
   if(cats.length&&brands.length){
     // AND: only this brand within this category (e.g. Drogerie + Müller =
@@ -953,8 +979,8 @@ function buildQuery(scope){
     brands.forEach(function(b){parts.push('nwr'+bf(b)+ref+';');});
   }
   if(!parts.length)return null;
-  var to=scope.type==="country"?180:40,lim=scope.type==="country"?50000:3000;
-  var pre=scope.type==="country"?'area["ISO3166-1"="'+scope.cc+'"][admin_level=2]->.sa;':'';
+  var big=scope.type!=="bbox";
+  var to=big?180:40,lim=big?50000:3000;
   return "[out:json][timeout:"+to+"];"+pre+"("+parts.join("")+");out center tags "+lim+";";
 }
 // Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
@@ -988,14 +1014,14 @@ function parsePois(data){
 }
 function applyPois(pois,scope,fromCache){
   State.pois=pois;renderPois();drawCircles();
-  if(pois.length&&scope.type==="country"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
+  if(pois.length&&scope.type!=="bbox"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
   var el=$("result");el.className="result "+(pois.length?"ok":"warn");
   el.textContent=(pois.length?fmt(pois.length)+" POIs gefunden":"Keine POIs gefunden.")+(fromCache?" · aus Cache":"");
   setStatus("Bereit · "+fmt(pois.length)+" POIs");refreshButtons();scheduleMatch();
 }
 function searchPois(){
   var el=$("result");
-  var scopeVal=$("scope").value;
+  var scopeVal=$("scope").value, city=($("city").value||"").trim();
   var hasCat=CATEGORIES.some(function(c){return State.cats[c.key];});
   var hasBrand=State.brands.length>0;
   if(!hasCat&&!hasBrand){toast("Bitte mind. eine Kategorie oder Marke wählen.","warn");return;}
@@ -1007,17 +1033,19 @@ function searchPois(){
     var latLim=hasCat?2.0:5.0,lngLim=hasCat?3.0:7.0;
     if(latSpan>latLim||lngSpan>lngLim){
       el.className="result warn";
-      el.textContent="Gebiet zu groß – näher heranzoomen, oder oben „Ganz Deutschland“ wählen (für Marken).";
-      toast("Bitte näher heranzoomen oder ein ganzes Land als Gebiet wählen.","warn");return;
+      el.textContent="Gebiet zu groß – näher heranzoomen, oder oben ein Bundesland/Stadt wählen.";
+      toast("Bitte näher heranzoomen oder ein Bundesland/Stadt wählen.","warn");return;
     }
     scope={type:"bbox",bbox:b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5)};
   }else{
-    scope={type:"country",cc:scopeVal};
-    if(hasCat)toast("Hinweis: Kategorien landesweit können sehr groß/langsam sein – am besten nur Marken.","warn");
+    var bl=scopeVal==="DE"?null:scopeVal;
+    scope={type:"area",bundesland:bl,city:city||null};
+    if(hasCat&&!bl&&!city)toast("Hinweis: Kategorien landesweit sind sehr groß/langsam – Bundesland und/oder Stadt wählen.","warn");
   }
   var q=buildQuery(scope);
   el.className="result";
-  el.textContent=scope.type==="country"?"Landesweite Suche – das kann 10–60 s dauern …":"Suche bei OpenStreetMap …";
+  var wide=scope.type==="area"&&!scope.bundesland&&!scope.city;
+  el.textContent=wide?"Landesweite Suche – das kann 10–60 s dauern …":"Suche bei OpenStreetMap …";
   setStatus("Overpass-Abfrage läuft …");
   // Cache hit (same query) -> instant; else fetch + store the filtered result.
   idbCacheGet(q).then(function(cached){
