@@ -715,10 +715,9 @@ input[type=text]:focus{border-color:var(--accent)}
 .btn.sm{padding:6px 9px;font-size:12px}.btn.full{width:100%}.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:600}.btn.primary:hover{border-color:var(--accent)}.btn.ghost{background:transparent}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.chip{background:var(--accent);color:var(--on-accent);border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer}.chip::after{content:" ✕";opacity:.8}
 .cats{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
-.cats label{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}.cats input[type=checkbox]{accent-color:var(--accent)}
-.cats .cat-row{display:flex;align-items:center;gap:8px}.cats .cat-row>label{flex:1;min-width:0}
-.cats .catbrand{flex:0 0 124px;width:124px;padding:3px 7px;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--text);outline:none}
-.cats .catbrand:focus{border-color:var(--accent)}.cats .catbrand.off{display:none}.cats .catbrand::placeholder{color:var(--muted)}
+.cats label{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}.cats input{accent-color:var(--accent)}
+.selin{padding:8px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);outline:none}.selin:focus{border-color:var(--accent)}
+.chip .ch-cat{opacity:.8}
 .partners{margin-top:8px}.partner-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:5px;cursor:pointer}
 .partner-row.hidden-p{opacity:.45}.partner-row .pdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word}.partner-row .pcount{flex:0 0 auto;color:var(--muted);font-size:12px}
 .partner-row .px{flex:0 0 auto;background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
@@ -757,13 +756,16 @@ input[type=text]:focus{border-color:var(--accent)}
     <div class="sub">Karte auf das Zielgebiet zoomen, dann suchen.</div>
     <div class="block">
       <label class="lbl">Marke suchen</label>
-      <div class="row"><input id="brandInput" type="text" placeholder="z. B. Rossmann" style="flex:1" />
-        <button id="brandAdd" class="btn sm">+</button></div>
+      <input id="brandInput" type="text" placeholder="z. B. Rossmann" />
+      <div class="row" style="margin-top:6px;flex-wrap:nowrap">
+        <select id="brandCat" class="selin" style="flex:1;min-width:0"></select>
+        <button id="brandAdd" class="btn sm" style="flex:0 0 auto">+ hinzufügen</button>
+      </div>
       <div id="brandChips" class="chips"></div>
-      <div class="hint"><b>Marke suchen</b> findet eine Marke in <b>allen</b> Kategorien (z. B. Rossmann überall). Um <b>eine einzelne Kategorie auf eine Marke zu begrenzen</b>, trag die Marke ins Feld neben der Kategorie ein (leer = alle). So holst du z. B. <b>nur DM-Drogerien + alle Apotheken</b> in einer Suche.</div>
+      <div class="hint"><b>Marke</b> eintragen, optional eine <b>Kategorie für diese Marke</b> wählen (Standard: alle), dann „+". Beispiel: <b>DM · nur Drogerie</b>. <b>Kategorien</b> unten (Häkchen) = alle Filialen dieser Art. So holst du z. B. <b>DM (nur Drogerie) + Häkchen bei Apotheke</b> = nur DM-Drogerien + alle Apotheken.</div>
     </div>
     <div class="block">
-      <label class="lbl">Kategorien <span style="text-transform:none;color:var(--muted)">(Marke-Feld leer = alle Filialen dieser Art)</span></label>
+      <label class="lbl">Kategorien <span style="text-transform:none;color:var(--muted)">(= alle Filialen dieser Art)</span></label>
       <div id="cats" class="cats"></div>
     </div>
     <div class="block">
@@ -871,9 +873,11 @@ var CATEGORIES=[
  {key:"university",label:"Universität",f:'["amenity"="university"]'},
  {key:"cinema",label:"Kino",f:'["amenity"="cinema"]'}
 ];
+var CATMAP={};CATEGORIES.forEach(function(c){CATMAP[c.key]=c;});
 
 // ---- state ----------------------------------------------------------------
-var State={brands:[],cats:{},catBrand:{},globalRadius:100,pois:[],anchors:{},screens:[],hidden:{},matched:{}};
+// brands: [{term, cat}] — cat is a CATEGORIES key, or "" for any category
+var State={brands:[],cats:{},globalRadius:100,pois:[],anchors:{},screens:[],hidden:{},matched:{}};
 var idbOK=false;
 
 // ---- map ------------------------------------------------------------------
@@ -939,28 +943,27 @@ function setRadius(m,fromSlider){
 // ---- categories UI --------------------------------------------------------
 function renderCats(){
   $("cats").innerHTML=CATEGORIES.map(function(c){
-    var on=!!State.cats[c.key],bv=esc(State.catBrand[c.key]||"");
-    return '<div class="cat-row">'
-      +'<label><input type="checkbox" data-k="'+c.key+'"'+(on?' checked':'')+'><span>'+esc(c.label)+'</span></label>'
-      +'<input type="text" class="catbrand'+(on?'':' off')+'" data-k="'+c.key+'" value="'+bv+'" placeholder="alle" '
-      +'title="nur diese Marke in „'+esc(c.label)+'“ – leer = alle (mehrere mit Komma)">'
-      +'</div>';
+    var on=!!State.cats[c.key];
+    return '<label><input type="checkbox" data-k="'+c.key+'"'+(on?' checked':'')+'><span>'+esc(c.label)+'</span></label>';
   }).join("");
-  Array.prototype.forEach.call($("cats").querySelectorAll('input[type=checkbox]'),function(cb){
-    cb.addEventListener("change",function(){
-      var k=cb.getAttribute("data-k");State.cats[k]=cb.checked;
-      var bi=$("cats").querySelector('.catbrand[data-k="'+k+'"]');
-      if(bi){bi.classList.toggle("off",!cb.checked);if(cb.checked)bi.focus();}
-    });
+  Array.prototype.forEach.call($("cats").querySelectorAll("input"),function(cb){
+    cb.addEventListener("change",function(){State.cats[cb.getAttribute("data-k")]=cb.checked;});
   });
-  Array.prototype.forEach.call($("cats").querySelectorAll(".catbrand"),function(bi){
-    bi.addEventListener("input",function(){State.catBrand[bi.getAttribute("data-k")]=bi.value;});
-  });
+}
+// Category dropdown for the brand input ("in allen Kategorien" + one per category).
+function populateBrandCat(){
+  $("brandCat").innerHTML='<option value="">in allen Kategorien</option>'+
+    CATEGORIES.map(function(c){return '<option value="'+c.key+'">nur '+esc(c.label)+'</option>';}).join("");
 }
 function renderBrandChips(){
   $("brandChips").innerHTML="";
-  State.brands.forEach(function(b,i){var c=document.createElement("span");c.className="chip";c.textContent=b;
-    c.onclick=function(){State.brands.splice(i,1);renderBrandChips();};$("brandChips").appendChild(c);});
+  State.brands.forEach(function(b,i){
+    var c=document.createElement("span");c.className="chip";c.title="entfernen";
+    var cl=b.cat&&CATMAP[b.cat]?CATMAP[b.cat].label:"";
+    c.innerHTML=esc(b.term)+(cl?' <span class="ch-cat">· '+esc(cl)+'</span>':'');
+    c.onclick=function(){State.brands.splice(i,1);renderBrandChips();};
+    $("brandChips").appendChild(c);
+  });
 }
 
 // ---- Overpass discovery ---------------------------------------------------
@@ -1014,17 +1017,15 @@ function buildQuery(scope){
     if(!refs.length){pre+='area["ISO3166-1"="DE"][admin_level=2]->.de;';refs.push("(area.de)");}
     ref=refs.join("");                          // multiple area filters AND together
   }
-  // UNION of: each selected category (optionally restricted to its own
-  // brand[s]), plus each top-level "Marke suchen" brand (any category).
-  // A category with an empty brand field returns ALL of that category — so
-  // "Drogerie→DM" + "Apotheke→(leer)" = only DM-Drogerien + alle Apotheken.
+  // UNION of: each ticked category (ALL of that type) + each brand chip
+  // (that brand, optionally narrowed to one category). So a "DM · Drogerie"
+  // chip + a ticked "Apotheke" = only DM-Drogerien + alle Apotheken.
   var parts=[];
-  cats.forEach(function(c){
-    var cbs=splitBrands(State.catBrand[c.key]);
-    if(cbs.length){cbs.forEach(function(b){parts.push('nwr'+c.f+bf(b)+ref+';');});}
-    else{parts.push('nwr'+c.f+ref+';');}
+  cats.forEach(function(c){parts.push('nwr'+c.f+ref+';');});
+  brands.forEach(function(b){
+    var cf=b.cat&&CATMAP[b.cat]?CATMAP[b.cat].f:'';
+    parts.push('nwr'+cf+bf(b.term)+ref+';');
   });
-  brands.forEach(function(b){parts.push('nwr'+bf(b)+ref+';');});
   if(!parts.length)return null;
   var big=scope.type!=="bbox";
   var to=big?180:40,lim=big?50000:3000;
@@ -1033,8 +1034,6 @@ function buildQuery(scope){
 // Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
 // value, so a short brand like "dm" doesn't match substrings ("A-dm-iral").
 function escapeRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
-// A per-category brand field may hold several brands separated by commas.
-function splitBrands(s){return String(s||"").split(",").map(function(x){return x.trim();}).filter(Boolean);}
 // Compile the whole-word brand regexes once per search (not per element).
 function makeBrandTest(terms){
   var res=[];
@@ -1048,22 +1047,19 @@ function makeBrandTest(terms){
 var POI_TTL=14*24*3600*1000;            // cache POI query results for 14 days
 function parsePois(data){
   var seen={},pois=[];
-  // Mirror buildQuery client-side: keep an element if it matches a top-level
-  // brand (any category) OR its category is selected and the element passes
-  // that category's own brand restriction (null test = take all of it).
-  var catSel={};   // category label -> brand test (null = all of this category)
-  CATEGORIES.forEach(function(c){
-    if(!State.cats[c.key])return;
-    var cbs=splitBrands(State.catBrand[c.key]);
-    catSel[c.label]=cbs.length?makeBrandTest(cbs):null;
+  // Mirror buildQuery client-side: keep an element if its category is ticked
+  // (take all of it) OR a brand chip matches it (brand match, and — if the
+  // chip is narrowed to a category — that category too).
+  var catAll={};   // labels of ticked categories = take all
+  CATEGORIES.forEach(function(c){if(State.cats[c.key])catAll[c.label]=1;});
+  var chips=State.brands.map(function(b){
+    return {test:makeBrandTest([b.term]),label:b.cat&&CATMAP[b.cat]?CATMAP[b.cat].label:null};
   });
-  var topTerms=State.brands,hasTop=topTerms.length>0,topOk=makeBrandTest(topTerms);
   (data.elements||[]).forEach(function(e){
     var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
     if(lat==null||lng==null)return;var t=e.tags||{},cat=classify(t);
-    var keep=false;
-    if(hasTop&&topOk(t.brand))keep=true;
-    if(!keep&&catSel.hasOwnProperty(cat)){var test=catSel[cat];keep=test?test(t.brand):true;}
+    var keep=!!catAll[cat];
+    if(!keep){for(var i=0;i<chips.length;i++){var ch=chips[i];if(ch.test(t.brand)&&(!ch.label||ch.label===cat)){keep=true;break;}}}
     if(!keep)return;
     var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;
     pois.push({id:id,name:t.name||t.brand||cat,brand:t.brand||null,cat:cat,lat:lat,lng:lng});
@@ -1349,7 +1345,7 @@ function wire(){
   $("globalRadius").addEventListener("input",function(e){setRadius(radiusFromPos(+e.target.value),true);});
   Array.prototype.forEach.call($("radiusPresets").children,function(b){b.addEventListener("click",function(){setRadius(+b.getAttribute("data-r"),false);});});
   setRadius(State.globalRadius,false);          // init slider position + preset highlight
-  $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push(v);$("brandInput").value="";renderBrandChips();}});
+  $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push({term:v,cat:$("brandCat").value});$("brandInput").value="";$("brandInput").focus();renderBrandChips();}});
   $("brandInput").addEventListener("keydown",function(e){if(e.key==="Enter"){$("brandAdd").click();}});
   $("searchBtn").addEventListener("click",searchPois);
   $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});for(var id in poiMk)poiMk[id].setStyle(POI_ANCHOR);drawCircles();scheduleMatch();refreshButtons();});
@@ -1365,7 +1361,7 @@ function wire(){
 }
 
 // ---- init -----------------------------------------------------------------
-renderCats();wire();
+renderCats();populateBrandCat();wire();
 idbLoad().then(function(){renderPartners();renderScreens();doMatch();});
 })();
 </script>
