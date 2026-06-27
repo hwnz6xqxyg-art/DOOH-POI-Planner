@@ -744,12 +744,10 @@ input[type=text]:focus{border-color:var(--accent)}
     <div class="block">
       <label class="lbl">Gebiet</label>
       <select id="scope" style="width:100%;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text)">
-        <option value="view">Kartenausschnitt</option>
         <option value="DE">Ganz Deutschland</option>
-        <option value="AT">Ganz Österreich</option>
-        <option value="CH">Ganze Schweiz</option>
+        <option value="view">Kartenausschnitt (Stadt/Region)</option>
       </select>
-      <div class="hint">Für ganz DE/AT/CH am besten nur Marken wählen (z. B. dm, Rossmann) – Kategorien können landesweit zu groß sein.</div>
+      <div class="hint">Ganz Deutschland: am besten nur Marken wählen (z. B. dm, Rossmann) – Kategorien sind landesweit oft zu groß. Für Kategorien (z. B. Flughafen) auf eine Stadt/Region zoomen und „Kartenausschnitt“ wählen.</div>
     </div>
     <button id="searchBtn" class="btn primary full">POIs suchen</button>
     <div id="result" class="result"></div>
