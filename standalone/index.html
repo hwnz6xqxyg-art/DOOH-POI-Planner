@@ -838,6 +838,22 @@ var POI_ANCHOR={radius:7,color:GOLD,weight:2,fillColor:BLACK,fillOpacity:1};
 var SC_BASE={radius:3,stroke:false,fillColor:GOLD,fillOpacity:.65};
 var SC_HI={radius:4.5,stroke:true,color:BLACK,weight:1,fillColor:GOLD,fillOpacity:1};
 
+// ---- perf helpers: spatial grid for screens, debounce, fast POI lookup -----
+var GRID=0.05;                 // ~5.5 km cells (> max radius 5 km)
+var screenGrid=null;           // {"latCell_lngCell": [screen,...]}
+var poiById={};                // id -> poi (O(1) anchor resolve)
+var prevMatched=new Set();     // for diff-based highlight
+var CIRCLE_CAP=400;            // above this many anchors, skip per-anchor circles
+function debounce(fn,ms){var t;return function(){clearTimeout(t);t=setTimeout(fn,ms);};}
+function buildScreenIndex(){
+  screenGrid={};
+  for(var i=0;i<State.screens.length;i++){var s=State.screens[i];
+    if(s.lat==null||s.lng==null)continue;
+    var k=Math.floor(s.lat/GRID)+"_"+Math.floor(s.lng/GRID);
+    (screenGrid[k]||(screenGrid[k]=[])).push(s);
+  }
+}
+
 function haversineM(aLat,aLng,bLat,bLng){var R=6371000,r=Math.PI/180;var dLat=(bLat-aLat)*r,dLng=(bLng-aLng)*r;
  var s1=Math.sin(dLat/2),s2=Math.sin(dLng/2);var a=s1*s1+Math.cos(aLat*r)*Math.cos(bLat*r)*s2*s2;return 2*R*Math.asin(Math.min(1,Math.sqrt(a)));}
 function radiusOf(id){var a=State.anchors[id];return a&&a.radius?a.radius:State.globalRadius;}
@@ -917,15 +933,38 @@ function buildQuery(scope){
 // Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
 // value, so a short brand like "dm" doesn't match substrings ("A-dm-iral").
 function escapeRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
-function brandWholeWord(brand,terms){
-  if(!brand||!terms.length)return false;
-  var b=String(brand).toLowerCase();
-  for(var i=0;i<terms.length;i++){
-    var t=String(terms[i]).toLowerCase().trim();if(!t)continue;
-    try{if(new RegExp("(^|[^\\p{L}])"+escapeRe(t)+"([^\\p{L}]|$)","u").test(b))return true;}
-    catch(e){if(b===t)return true;} // fallback: exact match if \p{L} unsupported
+// Compile the whole-word brand regexes once per search (not per element).
+function makeBrandTest(terms){
+  var res=[];
+  for(var i=0;i<terms.length;i++){var t=String(terms[i]).toLowerCase().trim();if(!t)continue;
+    try{res.push(new RegExp("(^|[^\\p{L}])"+escapeRe(t)+"([^\\p{L}]|$)","u"));}
+    catch(e){res.push({x:t});} // fallback: exact match if \p{L} unsupported
   }
-  return false;
+  return function(brand){if(!brand||!res.length)return false;var b=String(brand).toLowerCase();
+    for(var j=0;j<res.length;j++){var r=res[j];if(r.x?b===r.x:r.test(b))return true;}return false;};
+}
+var POI_TTL=14*24*3600*1000;            // cache POI query results for 14 days
+function parsePois(data){
+  var seen={},pois=[],selLabels={},hasCat=false;
+  CATEGORIES.forEach(function(c){if(State.cats[c.key]){selLabels[c.label]=1;hasCat=true;}});
+  var terms=State.brands,hasBrand=terms.length>0,brandOk=makeBrandTest(terms);
+  (data.elements||[]).forEach(function(e){
+    var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
+    if(lat==null||lng==null)return;var t=e.tags||{},cat=classify(t);
+    var co=!!selLabels[cat],bo=brandOk(t.brand);
+    var keep=hasCat&&hasBrand?(co&&bo):(hasCat?co:bo); // AND when both set
+    if(!keep)return;
+    var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;
+    pois.push({id:id,name:t.name||t.brand||cat,brand:t.brand||null,cat:cat,lat:lat,lng:lng});
+  });
+  return pois;
+}
+function applyPois(pois,scope,fromCache){
+  State.pois=pois;renderPois();drawCircles();
+  if(pois.length&&scope.type==="country"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
+  var el=$("result");el.className="result "+(pois.length?"ok":"warn");
+  el.textContent=(pois.length?fmt(pois.length)+" POIs gefunden":"Keine POIs gefunden.")+(fromCache?" · aus Cache":"");
+  setStatus("Bereit · "+fmt(pois.length)+" POIs");refreshButtons();scheduleMatch();
 }
 function searchPois(){
   var el=$("result");
@@ -953,34 +992,17 @@ function searchPois(){
   el.className="result";
   el.textContent=scope.type==="country"?"Landesweite Suche – das kann 10–60 s dauern …":"Suche bei OpenStreetMap …";
   setStatus("Overpass-Abfrage läuft …");
-  fetchOverpass(q)
-   .then(function(data){
-     var seen={},pois=[];
-     var selLabels={},hasCat=false;CATEGORIES.forEach(function(c){if(State.cats[c.key]){selLabels[c.label]=1;hasCat=true;}});
-     var terms=State.brands,hasBrand=terms.length>0;
-     (data.elements||[]).forEach(function(e){
-       var lat=e.type==="node"?e.lat:(e.center&&e.center.lat),lng=e.type==="node"?e.lon:(e.center&&e.center.lon);
-       if(lat==null||lng==null)return;var t=e.tags||{};var cat=classify(t);
-       var catOk=!!selLabels[cat],brandOk=brandWholeWord(t.brand,terms);
-       // both set -> AND (brand within category); else just the active one
-       var keep=hasCat&&hasBrand?(catOk&&brandOk):(hasCat?catOk:brandOk);
-       if(!keep)return;
-       var id=e.type+"/"+e.id;if(seen[id])return;seen[id]=1;
-       pois.push({id:id,name:t.name||t.brand||cat,brand:t.brand||null,cat:cat,lat:lat,lng:lng});
-     });
-     State.pois=pois;renderPois();drawCircles();
-     if(pois.length&&scope.type==="country"){var bn=L.latLngBounds(pois.map(function(p){return[p.lat,p.lng];}));if(bn.isValid())map.fitBounds(bn,{padding:[20,20]});}
-     el.className="result "+(pois.length?"ok":"warn");
-     el.textContent=pois.length?(fmt(pois.length)+" POIs gefunden"):"Keine POIs gefunden.";
-     setStatus("Bereit · "+fmt(pois.length)+" POIs");
-     refreshButtons();
-   })
-   .catch(function(err){el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
+  // Cache hit (same query) -> instant; else fetch + store the filtered result.
+  idbCacheGet(q).then(function(cached){
+    if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){applyPois(cached.pois,scope,true);return;}
+    return fetchOverpass(q).then(function(data){var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
+  }).catch(function(err){el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
 }
 
 function renderPois(){
-  poiLayer.clearLayers();poiMk={};
+  poiLayer.clearLayers();poiMk={};poiById={};
   State.pois.forEach(function(p){
+    poiById[p.id]=p;
     var m=L.circleMarker([p.lat,p.lng],State.anchors[p.id]?POI_ANCHOR:POI_BASE);
     // Hover tooltip for the name (non-blocking); a left-click toggles the anchor
     // on/off. No popup, so a second click on a selected point reliably removes it.
@@ -992,26 +1014,39 @@ function renderPois(){
 function toggleAnchor(p){
   if(State.anchors[p.id])delete State.anchors[p.id];else State.anchors[p.id]={radius:null,p:p};
   var m=poiMk[p.id];if(m)m.setStyle(State.anchors[p.id]?POI_ANCHOR:POI_BASE);
-  drawCircles();doMatch();refreshButtons();
+  drawCircles();scheduleMatch();refreshButtons();
 }
 function drawCircles(){
   circleLayer.clearLayers();circleMk={};
-  Object.keys(State.anchors).forEach(function(id){var a=State.anchors[id],p=a.p||findPoi(id);if(!p)return;
+  var ids=Object.keys(State.anchors);
+  if(ids.length>CIRCLE_CAP)return;            // too many to draw cleanly/fast
+  ids.forEach(function(id){var a=State.anchors[id],p=a.p||poiById[id];if(!p)return;
     var c=L.circle([p.lat,p.lng],{radius:radiusOf(id),color:GOLD,weight:1,fillColor:GOLD,fillOpacity:.07,interactive:false});circleLayer.addLayer(c);circleMk[id]=c;});
 }
-function findPoi(id){for(var i=0;i<State.pois.length;i++)if(State.pois[i].id===id)return State.pois[i];return null;}
 
 // ---- matching -------------------------------------------------------------
 function doMatch(){
-  State.matched={};var ids=Object.keys(State.anchors);
-  var visScreens=State.screens.filter(function(s){return !State.hidden[s.partner];});
-  var byScreen={},coveredAnchors={};
-  if(ids.length&&visScreens.length){
-    ids.forEach(function(id){var a=State.anchors[id],p=a.p||findPoi(id);if(!p)return;var r=radiusOf(id);
-      visScreens.forEach(function(s){var d=haversineM(p.lat,p.lng,s.lat,s.lng);if(d>r)return;
-        coveredAnchors[id]=true;var k=s.partner+"||"+s.screenId;
-        var e=byScreen[k];if(!e){e=byScreen[k]={s:s,anchors:[],nearId:id,nearD:d,rUsed:r};}
-        e.anchors.push(id);if(d<e.nearD){e.nearD=d;e.nearId=id;e.rUsed=r;}});});
+  if(screenGrid===null)buildScreenIndex();
+  var ids=Object.keys(State.anchors),byScreen={},coveredAnchors={},hid=State.hidden;
+  if(ids.length){
+    for(var ai=0;ai<ids.length;ai++){
+      var id=ids[ai],a=State.anchors[id],p=a.p||poiById[id];if(!p)continue;
+      var r=a.radius||State.globalRadius;
+      // bounding cells around the anchor (degrees from metres)
+      var dLat=r/111320,dLng=r/(111320*Math.cos(p.lat*Math.PI/180));
+      var laMin=Math.floor((p.lat-dLat)/GRID),laMax=Math.floor((p.lat+dLat)/GRID);
+      var loMin=Math.floor((p.lng-dLng)/GRID),loMax=Math.floor((p.lng+dLng)/GRID);
+      for(var la=laMin;la<=laMax;la++)for(var lo=loMin;lo<=loMax;lo++){
+        var bucket=screenGrid[la+"_"+lo];if(!bucket)continue;
+        for(var bi=0;bi<bucket.length;bi++){var s=bucket[bi];
+          if(hid[s.partner])continue;
+          var d=haversineM(p.lat,p.lng,s.lat,s.lng);if(d>r)continue;
+          coveredAnchors[id]=true;var k=s.partner+"||"+s.screenId;
+          var e=byScreen[k];if(!e){e=byScreen[k]={s:s,anchors:[],nearId:id,nearD:d,rUsed:r};}
+          e.anchors.push(id);if(d<e.nearD){e.nearD=d;e.nearId=id;e.rUsed=r;}
+        }
+      }
+    }
   }
   State.matched=byScreen;applyHighlight();
   var nScreens=Object.keys(byScreen).length,nA=ids.length,nCov=Object.keys(coveredAnchors).length;
@@ -1019,13 +1054,20 @@ function doMatch(){
   $("pcCoverage").textContent=nA?(Math.round(1000*nCov/nA)/10+"%"):"–";
   $("exportBtn").disabled=nScreens===0;
 }
+var scheduleMatch=debounce(doMatch,110);                       // coalesce rapid changes
+var scheduleUpdate=debounce(function(){drawCircles();doMatch();},110); // for the radius slider
+// Diff-restyle only the screen markers whose in/out state changed (cheap at scale).
 function applyHighlight(){
-  Object.keys(screenMk).forEach(function(k){screenMk[k].setStyle(State.matched[k]?SC_HI:SC_BASE);});
+  var cur=State.matched,next=new Set();
+  prevMatched.forEach(function(k){if(!cur[k]){var m=screenMk[k];if(m)m.setStyle(SC_BASE);}});
+  for(var k in cur){next.add(k);if(!prevMatched.has(k)){var m=screenMk[k];if(m)m.setStyle(SC_HI);}}
+  prevMatched=next;
 }
 
 // ---- screens rendering ----------------------------------------------------
 function renderScreens(){
-  screenLayer.clearLayers();screenMk={};
+  buildScreenIndex();                       // keep the match index in sync
+  screenLayer.clearLayers();screenMk={};prevMatched=new Set();
   State.screens.forEach(function(s){if(State.hidden[s.partner])return;var k=s.partner+"||"+s.screenId;
     var m=L.circleMarker([s.lat,s.lng],SC_BASE);
     m.bindPopup('<strong>'+esc(s.name||s.screenId)+'</strong><div class="pp-meta">'+esc(s.partner)+" · "+esc(s.screenId)+(s.format?" · "+esc(s.format):"")+'</div>');
@@ -1041,10 +1083,10 @@ function renderPartners(){
     '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(c[p])+'</span><button class="px" title="entfernen">✕</button></div>';}).join("");
   Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
     var p=row.getAttribute("data-p");
-    row.addEventListener("click",function(e){if(e.target.classList.contains("px"))return;State.hidden[p]=!State.hidden[p];renderPartners();renderScreens();doMatch();});
+    row.addEventListener("click",function(e){if(e.target.classList.contains("px"))return;State.hidden[p]=!State.hidden[p];renderPartners();renderScreens();scheduleMatch();});
     row.querySelector(".px").addEventListener("click",function(e){e.stopPropagation();
       if(!confirm('Partner „'+p+'" entfernen?'))return;State.screens=State.screens.filter(function(s){return s.partner!==p;});delete State.hidden[p];
-      idbReplaceAll();renderPartners();renderScreens();doMatch();});
+      idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
   });
 }
 
@@ -1133,13 +1175,14 @@ function updateSummary(){var m=currentMapping(),el=$("mapSummary");
 function doImport(){var partner=($("mapPartner").value||"").trim();if(!partner){$("mapPartner").focus();return;}
   var r=buildRecords(partner);if(!r.recs.length)return;
   State.screens=State.screens.filter(function(s){return s.partner!==partner;}).concat(r.recs);
-  idbReplaceAll();renderPartners();renderScreens();doMatch();$("mapModal").classList.add("hidden");
+  idbReplaceAll();renderPartners();renderScreens();scheduleMatch();$("mapModal").classList.add("hidden");
   toast(fmt(r.recs.length)+' Screens „'+partner+'" importiert'+(r.skipped?" · "+fmt(r.skipped)+" übersprungen":""),"ok");}
 
 // ---- export (;-CSV, BOM, CRLF) --------------------------------------------
 function csvCell(v){v=v==null?"":String(v);return /[";\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 var EXPORT_COLS=["screen_id","partner","name","lat","lng","city","plz","address","format","matched_poi_ids","nearest_poi_id","nearest_distance_m","radius_used_m"];
 function exportCsv(){
+  doMatch();                                  // flush any pending debounced match
   var keys=Object.keys(State.matched);if(!keys.length)return;
   var rows=keys.map(function(k){return State.matched[k];}).sort(function(a,b){return a.s.partner.localeCompare(b.s.partner,"de")||String(a.s.screenId).localeCompare(String(b.s.screenId),"de",{numeric:true});});
   var lines=[EXPORT_COLS.join(";")];
@@ -1152,10 +1195,14 @@ function exportCsv(){
   toast(fmt(rows.length)+" Screens exportiert","ok");}
 
 // ---- inventory persistence (IndexedDB best-effort) ------------------------
-var DB="dooh-poi-planner",STORE="screens",_db=null;
-function idbOpen(){return new Promise(function(res,rej){if(!window.indexedDB){rej(new Error("no idb"));return;}
-  var rq=indexedDB.open(DB,1);rq.onupgradeneeded=function(){var db=rq.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"key"});};
+var DB="dooh-poi-planner",STORE="screens",CACHE="poicache",_db=null;
+function idbOpen(){if(_db)return Promise.resolve(_db);return new Promise(function(res,rej){if(!window.indexedDB){rej(new Error("no idb"));return;}
+  var rq=indexedDB.open(DB,2);rq.onupgradeneeded=function(){var db=rq.result;
+    if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"key"});
+    if(!db.objectStoreNames.contains(CACHE))db.createObjectStore(CACHE,{keyPath:"q"});};
   rq.onsuccess=function(){_db=rq.result;res(_db);};rq.onerror=function(){rej(rq.error);};});}
+function idbCacheGet(q){return idbOpen().then(function(db){return new Promise(function(res){try{var rq=db.transaction(CACHE,"readonly").objectStore(CACHE).get(q);rq.onsuccess=function(){res(rq.result||null);};rq.onerror=function(){res(null);};}catch(e){res(null);}});}).catch(function(){return null;});}
+function idbCachePut(q,pois){idbOpen().then(function(db){try{db.transaction(CACHE,"readwrite").objectStore(CACHE).put({q:q,pois:pois,ts:Date.now()});}catch(e){}}).catch(function(){});}
 function idbReplaceAll(){if(!idbOK)return;try{idbOpen().then(function(db){var tx=db.transaction(STORE,"readwrite"),os=tx.objectStore(STORE);
   os.clear();os.put({key:"all",screens:State.screens,hidden:State.hidden});}).catch(function(){});}catch(e){}}
 function idbLoad(){return idbOpen().then(function(db){return new Promise(function(res){var rq=db.transaction(STORE,"readonly").objectStore(STORE).get("all");
@@ -1168,12 +1215,12 @@ function idbLoad(){return idbOpen().then(function(db){return new Promise(functio
 function refreshButtons(){$("selectAll").disabled=State.pois.length===0;$("clearAnchors").disabled=Object.keys(State.anchors).length===0;}
 function wire(){
   $("globalRadius").value=State.globalRadius;paintRange($("globalRadius"));
-  $("globalRadius").addEventListener("input",function(e){State.globalRadius=parseInt(e.target.value,10);$("radiusVal").textContent=State.globalRadius;paintRange(e.target);drawCircles();doMatch();});
+  $("globalRadius").addEventListener("input",function(e){State.globalRadius=parseInt(e.target.value,10);$("radiusVal").textContent=State.globalRadius;paintRange(e.target);scheduleUpdate();});
   $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push(v);$("brandInput").value="";renderBrandChips();}});
   $("brandInput").addEventListener("keydown",function(e){if(e.key==="Enter"){$("brandAdd").click();}});
   $("searchBtn").addEventListener("click",searchPois);
-  $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});renderPois();drawCircles();doMatch();refreshButtons();});
-  $("clearAnchors").addEventListener("click",function(){State.anchors={};renderPois();drawCircles();doMatch();refreshButtons();});
+  $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});renderPois();drawCircles();scheduleMatch();refreshButtons();});
+  $("clearAnchors").addEventListener("click",function(){State.anchors={};renderPois();drawCircles();scheduleMatch();refreshButtons();});
   $("uploadBtn").addEventListener("click",function(){$("fileInput").value="";$("fileInput").click();});
   $("fileInput").addEventListener("change",function(e){var f=e.target.files&&e.target.files[0];if(!f)return;setStatus("Lese „"+f.name+"“ …");
     readSpreadsheet(f).then(function(parsed){parsed.fileName=f.name;if(!parsed.headers.length||!parsed.rows.length){toast("Datei enthält keine Daten.","err");return;}openMapping(parsed);})
