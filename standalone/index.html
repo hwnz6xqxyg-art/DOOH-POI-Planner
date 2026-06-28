@@ -885,30 +885,48 @@ var map=L.map("map",{preferCanvas:true}).setView([51.1,10.4],6);   // double-cli
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   {attribution:"&copy; OpenStreetMap &copy; CARTO",subdomains:"abcd",maxZoom:19}).addTo(map);
 // Coloured cluster bubbles with a count; markers split apart as you zoom in.
-// dir<0 shifts the bubble up-left of its point, dir>0 down-right — by (half size
-// + pad) so a POI bubble and a screen bubble at the same place never overlap
-// (the true location sits in the small gap between them).
-function clusterIcon(bg,fg,dir){return function(cl){var n=cl.getChildCount(),s=n<25?32:n<200?40:n<2000?48:56;
-  var label=n>=1000?(n/1000).toFixed(n<10000?1:0).replace(".0","")+"k":n;
-  var pad=4,off=dir<0?s+pad:-pad;
-  return L.divIcon({html:'<div style="background:'+bg+';color:'+fg+';width:'+s+'px;height:'+s+'px;line-height:'+s+'px;border-radius:50%;text-align:center;font-weight:600;font-size:12px;border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 5px rgba(0,0,0,.35)">'+label+'</div>',className:'',iconSize:[s,s],iconAnchor:[off,off]});};}
+// off>0 shifts the bubble up-left of its point, off<0 down-right — so a POI
+// bubble and a screen bubble at the same place never overlap (the true
+// location sits in the small gap between them).
+function clusterSize(n){return n<25?32:n<200?40:n<2000?48:56;}
+function shortNum(n){return n>=1000?(n/1000).toFixed(n<10000?1:0).replace(".0","")+"k":""+n;}
+function clusterDivIcon(bg,fg,size,label,off){
+  return L.divIcon({html:'<div style="background:'+bg+';color:'+fg+';width:'+size+'px;height:'+size+'px;line-height:'+size+'px;border-radius:50%;text-align:center;font-weight:600;font-size:12px;border:2px solid rgba(255,255,255,.85);box-shadow:0 1px 5px rgba(0,0,0,.35)">'+label+'</div>',className:'',iconSize:[size,size],iconAnchor:[off,off]});
+}
+function poiClusterIcon(cl){var n=cl.getChildCount(),s=clusterSize(n);return clusterDivIcon(BLACK,"#fff",s,shortNum(n),s+4);}
+// Screens are gold by default. Once POIs are anchored, a screen cluster is
+// gold only for the screens actually IN radius: all-out clusters turn muted
+// grey, and mixed clusters read "in/total" — so a group is never shown as
+// fully highlighted when only some of it is within range.
+function screenClusterIcon(cl){
+  var n=cl.getChildCount(),s=clusterSize(n),off=-4;
+  if(!anchorsActive)return clusterDivIcon(GOLD,BLACK,s,shortNum(n),off);
+  var kids=cl.getAllChildMarkers(),hit=0;
+  for(var i=0;i<kids.length;i++){var sc=kids[i]._s;if(sc&&State.matched[sc.partner+"||"+sc.screenId])hit++;}
+  if(hit===0)return clusterDivIcon(MUTE,"#fff",s,shortNum(n),off);
+  if(hit===n)return clusterDivIcon(GOLD,BLACK,s,shortNum(hit),off);
+  return clusterDivIcon(GOLD,BLACK,s,shortNum(hit)+"/"+shortNum(n),off);
+}
 var CL_OPTS={chunkedLoading:true,showCoverageOnHover:false,maxClusterRadius:60,spiderfyOnMaxZoom:true};
-var poiLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#1a1a1a","#fff",-1)},CL_OPTS)).addTo(map);     // POIs: black bubbles (up-left)
-var screenLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:clusterIcon("#b8932f","#1a1a1a",1)},CL_OPTS)).addTo(map); // screens: gold bubbles (down-right)
+var poiLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:poiClusterIcon},CL_OPTS)).addTo(map);     // POIs: black bubbles (up-left)
+var screenLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:screenClusterIcon},CL_OPTS)).addTo(map); // screens: gold/grey by match
 var circleLayer=L.layerGroup().addTo(map);
 var poiMk={},screenMk={},circleMk={};
 // L'Oréal coding: POIs/anchors in black, DOOH screens in L'Oréal gold.
-var GOLD="#b8932f",BLACK="#1a1a1a";
+// MUTE = warm grey for screens that fall OUTSIDE every anchor's radius.
+var GOLD="#b8932f",BLACK="#1a1a1a",MUTE="#9e988a";
 var POI_BASE={radius:6,color:BLACK,weight:1,fillColor:BLACK,fillOpacity:.7};
 var POI_ANCHOR={radius:7,color:GOLD,weight:2,fillColor:BLACK,fillOpacity:1};
 var SC_BASE={radius:3,stroke:false,fillColor:GOLD,fillOpacity:.65};
 var SC_HI={radius:4.5,stroke:true,color:BLACK,weight:1,fillColor:GOLD,fillOpacity:1};
+var SC_MUTED={radius:2.5,stroke:false,fillColor:MUTE,fillOpacity:.5};   // out of range
 
 // ---- perf helpers: spatial grid for screens, debounce, fast POI lookup -----
 var GRID=0.05;                 // ~5.5 km cells (> max radius 5 km)
 var screenGrid=null;           // {"latCell_lngCell": [screen,...]}
 var poiById={};                // id -> poi (O(1) anchor resolve)
 var prevMatched=new Set();     // for diff-based highlight
+var anchorsActive=false,prevAnchorsActive=false; // any anchors set? drives mute/gold
 var CIRCLE_CAP=400;            // above this many anchors, skip per-anchor circles
 function debounce(fn,ms){var t;return function(){clearTimeout(t);t=setTimeout(fn,ms);};}
 function buildScreenIndex(){
@@ -1164,7 +1182,7 @@ function doMatch(){
       }
     }
   }
-  State.matched=byScreen;applyHighlight();
+  State.matched=byScreen;applyHighlight();screenLayer.refreshClusters();
   var nScreens=Object.keys(byScreen).length,nA=ids.length,nCov=Object.keys(coveredAnchors).length;
   $("pcAnchors").textContent=fmt(nA);$("pcScreens").textContent=fmt(nScreens);
   $("pcCoverage").textContent=nA?(Math.round(1000*nCov/nA)/10+"%"):"–";
@@ -1172,10 +1190,19 @@ function doMatch(){
 }
 var scheduleMatch=debounce(doMatch,110);                       // coalesce rapid changes
 var scheduleUpdate=debounce(function(){drawCircles();doMatch();},110); // for the radius slider
-// Diff-restyle only the screen markers whose in/out state changed (cheap at scale).
-function applyHighlight(){
-  var cur=State.matched,next=new Set();
-  prevMatched.forEach(function(k){if(!cur[k]){var m=screenMk[k];if(m)m.setStyle(SC_BASE);}});
+// Restyle screen markers by match state: matched = gold (SC_HI); not matched =
+// muted grey while anchors are set, else neutral gold. Diff-restyle only the
+// markers whose state changed (cheap at scale); a full pass runs on the
+// no-anchors<->anchors flip or an explicit render.
+function applyHighlight(full){
+  anchorsActive=Object.keys(State.anchors).length>0;
+  var cur=State.matched,rest=anchorsActive?SC_MUTED:SC_BASE;
+  if(full||anchorsActive!==prevAnchorsActive){
+    for(var key in screenMk){var mm=screenMk[key];if(mm)mm.setStyle(cur[key]?SC_HI:rest);}
+    prevMatched=new Set(Object.keys(cur));prevAnchorsActive=anchorsActive;return;
+  }
+  var next=new Set();
+  prevMatched.forEach(function(k){if(!cur[k]){var m=screenMk[k];if(m)m.setStyle(rest);}});
   for(var k in cur){next.add(k);if(!prevMatched.has(k)){var m=screenMk[k];if(m)m.setStyle(SC_HI);}}
   prevMatched=next;
 }
@@ -1183,12 +1210,13 @@ function applyHighlight(){
 // ---- screens rendering ----------------------------------------------------
 function renderScreens(){
   buildScreenIndex();                       // keep the match index in sync
+  anchorsActive=Object.keys(State.anchors).length>0; // so fresh clusters colour right
   screenLayer.clearLayers();screenMk={};prevMatched=new Set();var arr=[];
   State.screens.forEach(function(s){if(State.hidden[s.partner])return;var k=s.partner+"||"+s.screenId;
     var m=L.circleMarker([s.lat,s.lng],SC_BASE);m._s=s;m.on("click",screenClick);
     screenMk[k]=m;arr.push(m);});
   screenLayer.addLayers(arr);                   // bulk add (clustered)
-  applyHighlight();
+  applyHighlight(true);
 }
 function partnerCounts(){var c={};State.screens.forEach(function(s){c[s.partner]=(c[s.partner]||0)+1;});return c;}
 function renderPartners(){
