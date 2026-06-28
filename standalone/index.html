@@ -743,6 +743,14 @@ input[type=text]:focus{border-color:var(--accent)}
 .toast.ok{border-color:var(--ok)}.toast.err{border-color:var(--err)}.toast.warn{border-color:var(--warn)}
 .leaflet-container{background:#ebe8e1}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--text)}
 .pp-meta{color:var(--muted);font-size:12px}.pp-radius{width:160px;accent-color:var(--accent)}
+.legend{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);box-shadow:0 1px 6px rgba(0,0,0,.15);line-height:1.55}
+.legend .lg-title{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin-bottom:4px}
+.legend .lg-row{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.legend .dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex:0 0 auto;box-sizing:border-box}
+.legend .d-poi{background:#1a1a1a}.legend .d-anchor{background:#1a1a1a;border:2px solid #b8932f}
+.legend .d-in{background:#b8932f}.legend .d-out{background:#9e988a}
+.legend .lg-badge{display:inline-block;min-width:20px;text-align:center;background:#b8932f;color:#1a1a1a;border-radius:9px;font-size:10px;font-weight:600;padding:0 4px;flex:0 0 auto}
+.legend .lg-anchor{display:none}.legend.has-anchors .lg-anchor{display:flex}.legend.has-anchors .lg-noanchor{display:none}
 </style>
 </head>
 <body>
@@ -912,6 +920,25 @@ var poiLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:poiClusterIc
 var screenLayer=L.markerClusterGroup(Object.assign({iconCreateFunction:screenClusterIcon},CL_OPTS)).addTo(map); // screens: gold/grey by match
 var circleLayer=L.layerGroup().addTo(map);
 var poiMk={},screenMk={},circleMk={};
+// Map legend — explains the marker/cluster colour code. The "out of range"
+// and partial-cluster rows only appear once POIs are anchored (.has-anchors).
+var legendEl=null;
+(function(){
+  var Legend=L.Control.extend({options:{position:"bottomleft"},onAdd:function(){
+    var d=L.DomUtil.create("div","legend");
+    d.innerHTML='<div class="lg-title">Legende</div>'+
+      '<div class="lg-row"><span class="dot d-poi"></span>POI</div>'+
+      '<div class="lg-row"><span class="dot d-anchor"></span>Anker (ausgewählt)</div>'+
+      '<div class="lg-row lg-noanchor"><span class="dot d-in"></span>Screen</div>'+
+      '<div class="lg-row lg-anchor"><span class="dot d-in"></span>Screen im Radius</div>'+
+      '<div class="lg-row lg-anchor"><span class="dot d-out"></span>Screen außerhalb</div>'+
+      '<div class="lg-row lg-anchor"><span class="lg-badge">2/5</span>Cluster: im Radius&thinsp;/&thinsp;gesamt</div>';
+    L.DomEvent.disableClickPropagation(d);L.DomEvent.disableScrollPropagation(d);
+    legendEl=d;return d;
+  }});
+  new Legend().addTo(map);
+})();
+function updateLegend(){if(legendEl)legendEl.classList.toggle("has-anchors",anchorsActive);}
 // L'Oréal coding: POIs/anchors in black, DOOH screens in L'Oréal gold.
 // MUTE = warm grey for screens that fall OUTSIDE every anchor's radius.
 var GOLD="#b8932f",BLACK="#1a1a1a",MUTE="#9e988a";
@@ -1199,7 +1226,7 @@ var scheduleUpdate=debounce(function(){drawCircles();doMatch();},110); // for th
 // markers whose state changed (cheap at scale); a full pass runs on the
 // no-anchors<->anchors flip or an explicit render.
 function applyHighlight(full){
-  anchorsActive=Object.keys(State.anchors).length>0;
+  anchorsActive=Object.keys(State.anchors).length>0;updateLegend();
   var cur=State.matched,rest=anchorsActive?SC_MUTED:SC_BASE;
   if(full||anchorsActive!==prevAnchorsActive){
     for(var key in screenMk){var mm=screenMk[key];if(mm)mm.setStyle(cur[key]?SC_HI:rest);}
