@@ -811,7 +811,7 @@ input[type=text]:focus{border-color:var(--accent)}
       <div class="pc-sep"></div>
       <div class="pc-row"><span>Anker</span><b id="pcAnchors">0</b></div>
       <div class="pc-row"><span>Screens im Radius</span><b id="pcScreens">0</b></div>
-      <div class="pc-row"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
+      <div class="pc-row" title="Anteil der verfügbaren Screens (nicht ausgeblendete) im Radius eines Ankers"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
       <div class="pc-actions"><button id="exportBtn" class="btn sm primary" disabled>Export CSV</button></div>
     </div>
     <h2>DOOH-Inventar</h2>
@@ -1161,7 +1161,7 @@ function drawCircles(){
 // ---- matching -------------------------------------------------------------
 function doMatch(){
   if(screenGrid===null)buildScreenIndex();
-  var ids=Object.keys(State.anchors),byScreen={},coveredAnchors={},hid=State.hidden;
+  var ids=Object.keys(State.anchors),byScreen={},hid=State.hidden;
   if(ids.length){
     for(var ai=0;ai<ids.length;ai++){
       var id=ids[ai],a=State.anchors[id],p=a.p||poiById[id];if(!p)continue;
@@ -1175,7 +1175,7 @@ function doMatch(){
         for(var bi=0;bi<bucket.length;bi++){var s=bucket[bi];
           if(hid[s.partner])continue;
           var d=haversineM(p.lat,p.lng,s.lat,s.lng);if(d>r)continue;
-          coveredAnchors[id]=true;var k=s.partner+"||"+s.screenId;
+          var k=s.partner+"||"+s.screenId;
           var e=byScreen[k];if(!e){e=byScreen[k]={s:s,anchors:[],nearId:id,nearD:d,rUsed:r};}
           e.anchors.push(id);if(d<e.nearD){e.nearD=d;e.nearId=id;e.rUsed=r;}
         }
@@ -1183,9 +1183,13 @@ function doMatch(){
     }
   }
   State.matched=byScreen;applyHighlight();screenLayer.refreshClusters();
-  var nScreens=Object.keys(byScreen).length,nA=ids.length,nCov=Object.keys(coveredAnchors).length;
+  var nScreens=Object.keys(byScreen).length,nA=ids.length;
+  // Abdeckung = share of the AVAILABLE inventory (non-hidden screens) that
+  // falls within radius of any anchor — matched screens ÷ available screens.
+  var nAvail=0;for(var si=0;si<State.screens.length;si++){if(!hid[State.screens[si].partner])nAvail++;}
   $("pcAnchors").textContent=fmt(nA);$("pcScreens").textContent=fmt(nScreens);
-  $("pcCoverage").textContent=nA?(Math.round(1000*nCov/nA)/10+"%"):"–";
+  $("pcCoverage").textContent=nAvail?(Math.round(1000*nScreens/nAvail)/10+"%"):"–";
+  $("pcCoverage").title=fmt(nScreens)+" von "+fmt(nAvail)+" verfügbaren Screens";
   $("exportBtn").disabled=nScreens===0;
 }
 var scheduleMatch=debounce(doMatch,110);                       // coalesce rapid changes
