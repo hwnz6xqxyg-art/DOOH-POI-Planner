@@ -820,7 +820,7 @@ input[type=text]:focus{border-color:var(--accent)}
       <div class="pc-row"><span>Anker</span><b id="pcAnchors">0</b></div>
       <div class="pc-row"><span>Screens im Radius</span><b id="pcScreens">0</b></div>
       <div class="pc-row" title="Anteil der verfügbaren Screens (nicht ausgeblendete) im Radius eines Ankers"><span>Abdeckung</span><b id="pcCoverage">–</b></div>
-      <div class="pc-actions"><button id="exportBtn" class="btn sm primary" disabled>Export CSV</button></div>
+      <div class="pc-actions"><button id="exportBtn" class="btn sm primary" disabled title="Screens im Radius als CSV">Screens (CSV)</button><button id="exportPoiBtn" class="btn sm" disabled title="Lat/Long der Anker-POIs als StoreList-XLSX für den Trade Desk">POIs (XLSX)</button></div>
     </div>
     <h2>DOOH-Inventar</h2>
     <div class="sub">Eigene Screen-Liste hochladen.</div>
@@ -1217,7 +1217,7 @@ function doMatch(){
   $("pcAnchors").textContent=fmt(nA);$("pcScreens").textContent=fmt(nScreens);
   $("pcCoverage").textContent=nAvail?(Math.round(1000*nScreens/nAvail)/10+"%"):"–";
   $("pcCoverage").title=fmt(nScreens)+" von "+fmt(nAvail)+" verfügbaren Screens";
-  $("exportBtn").disabled=nScreens===0;
+  $("exportBtn").disabled=nScreens===0;$("exportPoiBtn").disabled=nA===0;
 }
 var scheduleMatch=debounce(doMatch,110);                       // coalesce rapid changes
 var scheduleUpdate=debounce(function(){drawCircles();doMatch();},110); // for the radius slider
@@ -1381,6 +1381,58 @@ function exportCsv(){
   document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);
   toast(fmt(rows.length)+" Screens exportiert","ok");}
 
+// ---- XLSX export of anchored POIs (Trade-Desk StoreList template) ----------
+// Writes a real .xlsx with no libraries: a ZIP of the minimal OOXML parts,
+// stored (uncompressed) so we only need CRC32, not a deflate implementation.
+var CRC_TBL=(function(){var t=[];for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function crc32(b){var c=0xFFFFFFFF;for(var i=0;i<b.length;i++)c=CRC_TBL[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipStore(files){
+  var u16=function(a,v){a.push(v&255,(v>>>8)&255);},u32=function(a,v){a.push(v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255);};
+  var enc=new TextEncoder(),parts=[],cdir=[],offset=0;
+  files.forEach(function(f){
+    var name=enc.encode(f.name),data=f.data,crc=crc32(data),sz=data.length;
+    var lh=[];u32(lh,0x04034b50);u16(lh,20);u16(lh,0x0800);u16(lh,0);u16(lh,0);u16(lh,0);u32(lh,crc);u32(lh,sz);u32(lh,sz);u16(lh,name.length);u16(lh,0);
+    var lhb=new Uint8Array(lh);parts.push(lhb,name,data);
+    var ch=[];u32(ch,0x02014b50);u16(ch,20);u16(ch,20);u16(ch,0x0800);u16(ch,0);u16(ch,0);u16(ch,0);u32(ch,crc);u32(ch,sz);u32(ch,sz);u16(ch,name.length);u16(ch,0);u16(ch,0);u16(ch,0);u16(ch,0);u32(ch,0);u32(ch,offset);
+    cdir.push(new Uint8Array(ch),name);offset+=lhb.length+name.length+data.length;
+  });
+  var cdSize=cdir.reduce(function(n,p){return n+p.length;},0);
+  var eo=[];u32(eo,0x06054b50);u16(eo,0);u16(eo,0);u16(eo,files.length);u16(eo,files.length);u32(eo,cdSize);u32(eo,offset);u16(eo,0);
+  return new Blob(parts.concat(cdir,[new Uint8Array(eo)]),{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+var XLSX_PARTS={
+  "[Content_Types].xml":'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+  "_rels/.rels":'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+  "xl/workbook.xml":'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="StoreList" sheetId="1" r:id="rId1"/></sheets></workbook>',
+  "xl/_rels/workbook.xml.rels":'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+};
+// Collect anchored POIs as [lat,lng], dedupe identical points, drop out-of-range.
+function anchorPoints(){
+  var seen={},pts=[],skipped=0;
+  Object.keys(State.anchors).forEach(function(id){
+    var a=State.anchors[id],p=a.p||poiById[id];if(!p)return;
+    var lat=+p.lat,lng=+p.lng;
+    if(!isFinite(lat)||!isFinite(lng)||lat<-90||lat>90||lng<-180||lng>180){skipped++;return;}
+    lat=Math.round(lat*1e6)/1e6;lng=Math.round(lng*1e6)/1e6;
+    var k=lat+","+lng;if(seen[k])return;seen[k]=1;pts.push([lat,lng]);
+  });
+  return {pts:pts,skipped:skipped};
+}
+function exportPoiXlsx(){
+  var r=anchorPoints();
+  if(!r.pts.length){toast("Keine Anker zum Exportieren – erst POIs als Anker wählen.","warn");return;}
+  if(r.pts.length>10000){toast("Mehr als 10.000 Anker – der Trade Desk erlaubt max. 10.000 Zeilen.","err");return;}
+  var rows='<row r="1"><c r="A1" t="inlineStr"><is><t>Latitude (Degrees)</t></is></c><c r="B1" t="inlineStr"><is><t>Longitude (Degrees)</t></is></c></row>';
+  r.pts.forEach(function(pt,i){var rn=i+2;rows+='<row r="'+rn+'"><c r="A'+rn+'"><v>'+pt[0]+'</v></c><c r="B'+rn+'"><v>'+pt[1]+'</v></c></row>';});
+  var sheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows+'</sheetData></worksheet>';
+  var enc=new TextEncoder(),files=Object.keys(XLSX_PARTS).map(function(n){return {name:n,data:enc.encode(XLSX_PARTS[n])};});
+  files.push({name:"xl/worksheets/sheet1.xml",data:enc.encode(sheet)});
+  var blob=zipStore(files),url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download="StoreList_"+new Date().toISOString().slice(0,16).replace(/[-:T]/g,"")+".xlsx";
+  document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  toast(fmt(r.pts.length)+" Anker-POIs als XLSX exportiert"+(r.skipped?" · "+r.skipped+" übersprungen":""),"ok");
+}
+
 // ---- inventory persistence (IndexedDB best-effort) ------------------------
 var DB="dooh-poi-planner",STORE="screens",CACHE="poicache",_db=null;
 function idbOpen(){if(_db)return Promise.resolve(_db);return new Promise(function(res,rej){if(!window.indexedDB){rej(new Error("no idb"));return;}
@@ -1417,6 +1469,7 @@ function wire(){
   $("mapImport").addEventListener("click",doImport);
   $("mapPartner").addEventListener("input",updateSummary);
   $("exportBtn").addEventListener("click",exportCsv);
+  $("exportPoiBtn").addEventListener("click",exportPoiXlsx);
 }
 
 // ---- init -----------------------------------------------------------------
