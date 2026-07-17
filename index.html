@@ -1511,20 +1511,31 @@ var OVERPASS_ENDPOINTS=[
  "https://overpass.kumi.systems/api/interpreter",
  "https://overpass.private.coffee/api/interpreter"
 ];
-// Try each mirror in turn; retry the next on 429 (rate limit) / 5xx / network.
-function fetchOverpass(q,idx){
+// Try each mirror in turn; retry the next on 429 (rate limit) / 5xx / network /
+// stall. Overloaded public mirrors often ACCEPT the connection and then queue
+// silently — without our own abort timer the browser would wait ~5 min per
+// mirror before failing over, which reads as "the search hangs forever". We
+// abort each attempt at the query's own [timeout:N] + 15 s grace instead.
+// onMirror(i) tells the UI which mirror (0-based) is being tried.
+function fetchOverpass(q,idx,onMirror){
   idx=idx||0;
   if(idx>=OVERPASS_ENDPOINTS.length)
     return Promise.reject(new Error("alle OpenStreetMap-Server gerade ausgelastet – bitte kurz warten oder Gebiet verkleinern."));
-  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(q)})
+  if(onMirror)try{onMirror(idx);}catch(e){}
+  var tm=/\[timeout:(\d+)\]/.exec(q),abortMs=((tm?+tm[1]:60)+15)*1000;
+  var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
+  var timer=ctl?setTimeout(function(){ctl.abort();},abortMs):null;
+  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(q),signal:ctl?ctl.signal:undefined})
    .then(function(r){
      if(r.status===429||r.status===504||r.status>=500)throw new Error("__retry__");
      if(!r.ok)throw new Error("Overpass HTTP "+r.status);
      return r.json();
    })
+   .then(function(j){if(timer)clearTimeout(timer);return j;})
    .catch(function(e){
-     if(e.message==="__retry__"||e.name==="TypeError") // rate-limited / busy / network -> next mirror
-       return new Promise(function(res){setTimeout(res,700);}).then(function(){return fetchOverpass(q,idx+1);});
+     if(timer)clearTimeout(timer);
+     if(e.message==="__retry__"||e.name==="TypeError"||e.name==="AbortError") // busy / network / stalled -> next mirror
+       return new Promise(function(res){setTimeout(res,700);}).then(function(){return fetchOverpass(q,idx+1,onMirror);});
      throw e;
    });
 }
@@ -1567,7 +1578,9 @@ function buildQuery(scope){
   });
   if(!parts.length)return null;
   var big=scope.type!=="bbox";
-  var to=big?180:40,lim=big?50000:3000;
+  // 90 s cap even nationwide: healthy servers answer well below it, and it
+  // bounds how long a struggling one can hold the search before failover.
+  var to=big?90:40,lim=big?50000:3000;
   return "[out:json][timeout:"+to+"];"+pre+"("+parts.join("")+");out center tags "+lim+";";
 }
 // Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
@@ -1638,14 +1651,24 @@ function searchPois(){
   var q=buildQuery(scope);
   el.className="result";
   var wide=scope.type==="area"&&!scope.bundesland&&!scope.city;
-  el.textContent=wide?"Landesweite Suche – das kann 10–60 s dauern …":"Suche bei OpenStreetMap …";
-  setStatus("Overpass-Abfrage läuft …");
+  // Live progress: which mirror is being tried + elapsed seconds, so a slow
+  // public server reads as "working on it", not as a hang.
+  if(searchTick)clearInterval(searchTick);
+  var t0=Date.now(),curMirror=0;
+  var baseMsg=wide?"Landesweite Suche – kann bis ~90 s dauern":"Suche bei OpenStreetMap";
+  function paint(){var s=Math.round((Date.now()-t0)/1000);
+    el.textContent=baseMsg+" · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s …";
+    setStatus("Overpass-Abfrage läuft · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s");}
+  paint();searchTick=setInterval(paint,1000);
+  function done(){if(searchTick){clearInterval(searchTick);searchTick=null;}}
   // Cache hit (same query) -> instant; else fetch + store the filtered result.
   idbCacheGet(q).then(function(cached){
-    if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){applyPois(cached.pois,scope,true);return;}
-    return fetchOverpass(q).then(function(data){var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
-  }).catch(function(err){el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
+    if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){done();applyPois(cached.pois,scope,true);return;}
+    return fetchOverpass(q,0,function(i){curMirror=i;paint();}).then(function(data){
+      done();var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
+  }).catch(function(err){done();el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
 }
+var searchTick=null;
 
 // Shared, lazy marker interactions: ONE tooltip + ONE popup built on demand, and
 // reused handler refs (no per-marker closures/objects) — much lighter at scale.
