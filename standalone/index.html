@@ -729,6 +729,7 @@ input[type=text]:focus{border-color:var(--accent)}
 .seg button{flex:1;min-width:0;border:none;background:transparent;border-radius:7px;padding:5px 4px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .seg button.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.18)}
 .seg button:not(.active):hover{color:var(--text)}
+.inv-actions{display:flex;gap:6px;margin-top:6px}.inv-actions button{flex:1;font-size:12px;padding:4px 6px}
 .partners{margin-top:8px}.partner-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:5px;cursor:pointer}
 .partner-row.hidden-p{opacity:.45}.partner-row .pdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word}.partner-row .pcount{flex:0 0 auto;color:var(--muted);font-size:12px}
 .partner-row .px{flex:0 0 auto;background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
@@ -848,6 +849,10 @@ input[type=text]:focus{border-color:var(--accent)}
         <button data-tab="ssp">SSP</button>
         <button data-tab="publisher">Publisher</button>
         <button data-tab="venue">Venue</button>
+      </div>
+      <div id="invActions" class="inv-actions">
+        <button id="invSelAll" class="btn sm ghost">Alle auswählen</button>
+        <button id="invDeselAll" class="btn sm ghost">Alle abwählen</button>
       </div>
       <div id="partnerList" class="partners"></div>
       <div id="invEmpty" class="hint">Noch kein Inventar geladen.</div>
@@ -1752,9 +1757,22 @@ function screenVisible(s){
   return true;
 }
 function dimCounts(d){var c={};State.screens.forEach(function(s){var v=s[d]||NOVAL;c[v]=(c[v]||0)+1;});return c;}
+// Select/deselect every value of the ACTIVE tab (partner list or a dimension).
+function invSetAll(hideAll){
+  var tab=State.invTab||"partner";
+  if(tab==="partner"){
+    State.hidden={};
+    if(hideAll)Object.keys(partnerCounts()).forEach(function(p){State.hidden[p]=true;});
+  }else{
+    State.hiddenF[tab]={};
+    if(hideAll)Object.keys(dimCounts(tab)).forEach(function(v){State.hiddenF[tab][v]=true;});
+  }
+  idbReplaceAll();renderPartners();renderScreens();scheduleMatch();
+}
 function renderPartners(){
   var names=Object.keys(partnerCounts());
   $("invEmpty").style.display=State.screens.length?"none":"";
+  $("invActions").style.display=State.screens.length?"":"none";
   $("invTotal").textContent=State.screens.length?(fmt(State.screens.length)+" Screens · "+names.length+" Partner"):"";
   var tab=State.invTab||"partner";
   Array.prototype.forEach.call($("invTabs").querySelectorAll("button"),function(b){b.classList.toggle("active",b.getAttribute("data-tab")===tab);});
@@ -2020,6 +2038,8 @@ function wire(){
   Array.prototype.forEach.call($("invTabs").querySelectorAll("button"),function(b){
     b.addEventListener("click",function(){State.invTab=b.getAttribute("data-tab");renderPartners();});
   });
+  $("invSelAll").addEventListener("click",function(){invSetAll(false);});
+  $("invDeselAll").addEventListener("click",function(){invSetAll(true);});
   $("licBtn").addEventListener("click",function(){$("licModal").classList.remove("hidden");});
   $("licClose").addEventListener("click",function(){$("licModal").classList.add("hidden");});
   $("licModal").addEventListener("click",function(e){if(e.target===$("licModal"))$("licModal").classList.add("hidden");});
