@@ -1774,13 +1774,23 @@ function renderPartnerRows(){
 }
 function renderDimRows(dim){
   var c=dimCounts(dim),vals=Object.keys(c),hf=State.hiddenF[dim];
+  // per-value partner provenance, so tooltips/hints can say WHICH list a value
+  // (especially "(ohne Angabe)") comes from
+  var byP={};State.screens.forEach(function(s){var v=s[dim]||NOVAL;(byP[v]||(byP[v]={}))[s.partner]=(byP[v][s.partner]||0)+1;});
+  function provenance(v){var e=byP[v]||{};return Object.keys(e).sort(function(a,b){return e[b]-e[a];})
+    .map(function(p){return p+" ("+fmt(e[p])+")";}).join(" · ");}
   // values sorted by screen count (desc), then name — the big levers first
   vals.sort(function(a,b){return c[b]-c[a]||a.localeCompare(b,"de");});
   if(!vals.length||(vals.length===1&&vals[0]===NOVAL)){
     $("partnerList").innerHTML='<div class="hint">Keine '+DIM_LABEL[dim]+'-Angaben im Inventar. Beim Import die Spalte „'+DIM_LABEL[dim]+'“ zuordnen (Liste ggf. neu hochladen).</div>';return;
   }
-  $("partnerList").innerHTML=vals.map(function(v){return '<div class="partner-row'+(hf[v]?" hidden-p":"")+'" data-p="'+esc(v)+'" title="Klick: ein-/ausblenden">'+
+  var htmlStr=vals.map(function(v){return '<div class="partner-row'+(hf[v]?" hidden-p":"")+'" data-p="'+esc(v)+'" title="aus: '+esc(provenance(v))+' – Klick: ein-/ausblenden">'+
     '<span class="pdot"></span><span class="pname">'+esc(v)+'</span><span class="pcount">'+fmt(c[v])+'</span></div>';}).join("");
+  if(c[NOVAL]){
+    // name the lists that lack this column so a stale-data hunch resolves itself
+    htmlStr+='<div class="hint">„'+NOVAL+'“ stammt aus: '+esc(provenance(NOVAL))+'. Diese Liste(n) haben keine '+DIM_LABEL[dim]+'-Spalte zugeordnet – neu hochladen und die Spalte „'+DIM_LABEL[dim]+'“ zuordnen, oder Liste entfernen.</div>';
+  }
+  $("partnerList").innerHTML=htmlStr;
   Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
     var v=row.getAttribute("data-p");
     row.addEventListener("click",function(){if(hf[v])delete hf[v];else hf[v]=true;idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
