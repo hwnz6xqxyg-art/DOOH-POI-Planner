@@ -3,7 +3,7 @@
 A **single-file, double-clickable** geo-proximity planning tool for Digital-out-of-Home
 (DOOH), Germany-focused. Upload your DOOH screen inventory, **discover Points of Interest
 live from OpenStreetMap** — brands (e.g. Rossmann, DM), drugstores, pharmacies, airports,
-stations, gyms … — select them as **anchors**, set a radius, and get every screen within
+stations, gyms … — **select** them, set a radius, and get every screen within
 range: deduped, mapped, counted, and exportable.
 
 **The whole app is [`index.html`](./index.html).** No install, no server, no build:
@@ -16,9 +16,9 @@ range: deduped, mapped, counted, and exportable.
 3. **Discover POIs** (left panel): add brands (optionally bound to a category, e.g.
    *DM · nur Drogerie*), tick categories, choose the area (Germany-wide, Bundesland,
    city, or map view), then **"POIs suchen"**.
-4. Click POIs (or *Alle als Anker*) to make them **anchors**, set the radius, and the
+4. Click POIs (or *Alle POIs auswählen*) to **select** them, set the radius, and the
    plan card shows screens in range + coverage.
-5. **Export**: matched screens as `;`-CSV (German Excel), or the anchored POIs' lat/long
+5. **Export**: matched screens as `;`-CSV (German Excel), or the selected POIs' lat/long
    as a Trade-Desk **StoreList XLSX**.
 
 ## Features
@@ -29,8 +29,8 @@ range: deduped, mapped, counted, and exportable.
 - **Inventory filters**: uploaded lists plus SSP / Publisher / Venue dimensions behind a
   segmented switcher; filters are faceted (each tab shows what remains under the other
   tabs' selections), with select-all/deselect-all and per-list provenance.
-- **Fast matching**: spatial grid index, ~10 ms for 100k screens × thousands of anchors;
-  radius 50 m – 5 km (log slider + presets), per-anchor override in the POI popup.
+- **Fast matching**: spatial grid index, ~10 ms for 100k screens × thousands of selected
+  POIs; radius 50 m – 5 km (log slider + presets), per-POI override in the popup.
 - **Readable map**: "Positron" light basemap (MapLibre GL under Leaflet), match-aware
   cluster bubbles (gold = in range, `n/m` = partial, grey = out of range), legend,
   L'Oréal-style white/gold/black theme.
