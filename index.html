@@ -1522,10 +1522,15 @@ function fetchOverpass(q,idx,onMirror){
   if(idx>=OVERPASS_ENDPOINTS.length)
     return Promise.reject(new Error("alle OpenStreetMap-Server gerade ausgelastet – bitte kurz warten oder Gebiet verkleinern."));
   if(onMirror)try{onMirror(idx);}catch(e){}
-  var tm=/\[timeout:(\d+)\]/.exec(q),abortMs=((tm?+tm[1]:60)+15)*1000;
+  // Last mirror = last chance: lift the server budget to 10 min and stretch the
+  // client abort to match, instead of giving up on a slow-but-alive query.
+  // (Browsers still enforce their own ~5 min ceiling on unanswered requests.)
+  var last=idx===OVERPASS_ENDPOINTS.length-1;
+  var qs=last?q.replace(/\[timeout:\d+\]/,"[timeout:600]"):q;
+  var tm=/\[timeout:(\d+)\]/.exec(qs),abortMs=((tm?+tm[1]:60)+15)*1000;
   var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
   var timer=ctl?setTimeout(function(){ctl.abort();},abortMs):null;
-  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(q),signal:ctl?ctl.signal:undefined})
+  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(qs),signal:ctl?ctl.signal:undefined})
    .then(function(r){
      if(r.status===429||r.status===504||r.status>=500)throw new Error("__retry__");
      if(!r.ok)throw new Error("Overpass HTTP "+r.status);
@@ -1626,6 +1631,10 @@ function applyPois(pois,scope,fromCache){
   el.textContent=(pois.length?fmt(pois.length)+" POIs gefunden":"Keine POIs gefunden.")+(fromCache?" · aus Cache":"");
   setStatus("Bereit · "+fmt(pois.length)+" POIs");refreshButtons();scheduleMatch();
 }
+// Nationwide searches run as 16 Bundesland chunks: each is a small, fast query
+// well under every server/browser limit, individually cached (a failed run
+// resumes where it stopped), with chunk progress in the status line.
+var BUNDESLAENDER=["Baden-Württemberg","Bayern","Berlin","Brandenburg","Bremen","Hamburg","Hessen","Mecklenburg-Vorpommern","Niedersachsen","Nordrhein-Westfalen","Rheinland-Pfalz","Saarland","Sachsen","Sachsen-Anhalt","Schleswig-Holstein","Thüringen"];
 function searchPois(){
   var el=$("result");
   var scopeVal=$("scope").value, city=($("city").value||"").trim();
@@ -1647,25 +1656,51 @@ function searchPois(){
   }else{
     var bl=scopeVal==="DE"?null:scopeVal;
     scope={type:"area",bundesland:bl,city:city||null};
-    if(hasCat&&!bl&&!city)toast("Hinweis: Kategorien landesweit sind sehr groß/langsam – Bundesland und/oder Stadt wählen.","warn");
   }
-  var q=buildQuery(scope);
   el.className="result";
   var wide=scope.type==="area"&&!scope.bundesland&&!scope.city;
-  // Live progress: which mirror is being tried + elapsed seconds, so a slow
+  // Live progress: chunk (nationwide) + mirror + elapsed seconds, so a slow
   // public server reads as "working on it", not as a hang.
   if(searchTick)clearInterval(searchTick);
-  var t0=Date.now(),curMirror=0;
-  var baseMsg=wide?"Landesweite Suche – kann mehrere Minuten dauern":"Suche bei OpenStreetMap";
+  var t0=Date.now(),curMirror=0,curChunk=0;
   function paint(){var s=Math.round((Date.now()-t0)/1000);
-    el.textContent=baseMsg+" · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s …";
-    setStatus("Overpass-Abfrage läuft · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s");}
+    var msg=(wide?"Landesweite Suche · Bundesland "+Math.min(curChunk+1,BUNDESLAENDER.length)+"/"+BUNDESLAENDER.length:"Suche bei OpenStreetMap")
+      +" · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s …";
+    el.textContent=msg;setStatus("Overpass: "+msg);}
   paint();searchTick=setInterval(paint,1000);
   function done(){if(searchTick){clearInterval(searchTick);searchTick=null;}}
+  function onMirror(i){curMirror=i;paint();}
+
+  if(wide){
+    // 16 Bundesland chunks, sequential (gentle on the shared servers). Each
+    // chunk caches under its own query key — a retry skips finished chunks.
+    var merged=[],seenIds={},allCached=true,ci=0;
+    (function step(){
+      if(ci>=BUNDESLAENDER.length){done();applyPois(merged,scope,allCached);return;}
+      curChunk=ci;curMirror=0;paint();
+      var qc=buildQuery({type:"area",bundesland:BUNDESLAENDER[ci],city:null});
+      idbCacheGet(qc).then(function(cached){
+        if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL)return cached.pois;
+        allCached=false;
+        return fetchOverpass(qc,0,onMirror).then(function(data){
+          var pois=parsePois(data);idbCachePut(qc,pois);
+          return new Promise(function(res){setTimeout(function(){res(pois);},250);});
+        });
+      }).then(function(pois){
+        for(var i=0;i<pois.length;i++){var p=pois[i];if(!seenIds[p.id]){seenIds[p.id]=1;merged.push(p);}}
+        ci++;step();
+      }).catch(function(err){done();el.className="result err";
+        el.textContent="Fehler bei "+BUNDESLAENDER[ci]+": "+(err.message||err)+" – bereits geladene Bundesländer sind zwischengespeichert, einfach erneut suchen.";
+        setStatus("Bereit");});
+    })();
+    return;
+  }
+
+  var q=buildQuery(scope);
   // Cache hit (same query) -> instant; else fetch + store the filtered result.
   idbCacheGet(q).then(function(cached){
     if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){done();applyPois(cached.pois,scope,true);return;}
-    return fetchOverpass(q,0,function(i){curMirror=i;paint();}).then(function(data){
+    return fetchOverpass(q,0,onMirror).then(function(data){
       done();var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
   }).catch(function(err){done();el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
 }
