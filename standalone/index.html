@@ -1648,7 +1648,9 @@ function poiOver(e){var p=e.target._poi;if(!p)return;sharedTip.setLatLng(e.latln
 function poiOut(){map.closeTooltip(sharedTip);}
 function poiClick(e){var p=e.target._poi;if(p)toggleAnchor(p);}
 function screenClick(e){var s=e.target._s;if(!s)return;
-  L.popup().setLatLng(e.latlng).setContent('<strong>'+esc(s.name||s.screenId)+'</strong><div class="pp-meta">'+esc(s.partner)+" · "+esc(s.screenId)+(s.format?" · "+esc(s.format):"")+'</div>').openOn(map);}
+  // Headline: Publisher · Venue-Typ (fall back to name/list when unmapped); subline: Screen-ID.
+  var head=[s.publisher,s.venue].filter(Boolean).join(" · ")||s.name||s.partner;
+  L.popup().setLatLng(e.latlng).setContent('<strong>'+esc(head)+'</strong><div class="pp-meta">'+esc(s.screenId)+'</div>').openOn(map);}
 function renderPois(){
   poiLayer.clearLayers();poiMk={};poiById={};var arr=[];
   State.pois.forEach(function(p){
