@@ -725,6 +725,10 @@ input[type=text]:focus{border-color:var(--accent)}
 .cats label{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}.cats input{accent-color:var(--accent)}
 .selin{padding:8px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);outline:none}.selin:focus{border-color:var(--accent)}
 .chip .ch-cat{opacity:.8}
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;margin-top:8px}
+.seg button{flex:1;min-width:0;border:none;background:transparent;border-radius:7px;padding:5px 4px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.seg button.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.seg button:not(.active):hover{color:var(--text)}
 .partners{margin-top:8px}.partner-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:5px;cursor:pointer}
 .partner-row.hidden-p{opacity:.45}.partner-row .pdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word}.partner-row .pcount{flex:0 0 auto;color:var(--muted);font-size:12px}
 .partner-row .px{flex:0 0 auto;background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
@@ -839,6 +843,12 @@ input[type=text]:focus{border-color:var(--accent)}
     <div class="block">
       <button id="uploadBtn" class="btn full">Inventar hochladen (.xlsx/.csv)</button>
       <div id="invTotal" class="hint"></div>
+      <div id="invTabs" class="seg" role="tablist">
+        <button data-tab="partner" class="active">Listen</button>
+        <button data-tab="ssp">SSP</button>
+        <button data-tab="publisher">Publisher</button>
+        <button data-tab="venue">Venue</button>
+      </div>
       <div id="partnerList" class="partners"></div>
       <div id="invEmpty" class="hint">Noch kein Inventar geladen.</div>
     </div>
@@ -1340,7 +1350,9 @@ var CATMAP={};CATEGORIES.forEach(function(c){CATMAP[c.key]=c;});
 
 // ---- state ----------------------------------------------------------------
 // brands: [{term, cat}] — cat is a CATEGORIES key, or "" for any category
-var State={brands:[],cats:{},globalRadius:100,pois:[],anchors:{},screens:[],hidden:{},matched:{}};
+// hidden: partner name -> true (list filter). hiddenF: per-dimension value filters
+// (ssp/publisher/venue -> {value:true}); all dimensions AND together.
+var State={brands:[],cats:{},globalRadius:100,pois:[],anchors:{},screens:[],hidden:{},hiddenF:{ssp:{},publisher:{},venue:{}},invTab:"partner",matched:{}};
 var idbOK=false;
 
 // ---- map ------------------------------------------------------------------
@@ -1664,7 +1676,7 @@ function drawCircles(){
 // ---- matching -------------------------------------------------------------
 function doMatch(){
   if(screenGrid===null)buildScreenIndex();
-  var ids=Object.keys(State.anchors),byScreen={},hid=State.hidden;
+  var ids=Object.keys(State.anchors),byScreen={};
   if(ids.length){
     for(var ai=0;ai<ids.length;ai++){
       var id=ids[ai],a=State.anchors[id],p=a.p||poiById[id];if(!p)continue;
@@ -1676,7 +1688,7 @@ function doMatch(){
       for(var la=laMin;la<=laMax;la++)for(var lo=loMin;lo<=loMax;lo++){
         var bucket=screenGrid[la+"_"+lo];if(!bucket)continue;
         for(var bi=0;bi<bucket.length;bi++){var s=bucket[bi];
-          if(hid[s.partner])continue;
+          if(!screenVisible(s))continue;
           var d=haversineM(p.lat,p.lng,s.lat,s.lng);if(d>r)continue;
           var k=s.partner+"||"+s.screenId;
           var e=byScreen[k];if(!e){e=byScreen[k]={s:s,anchors:[],nearId:id,nearD:d,rUsed:r};}
@@ -1687,9 +1699,9 @@ function doMatch(){
   }
   State.matched=byScreen;applyHighlight();screenLayer.refreshClusters();
   var nScreens=Object.keys(byScreen).length,nA=ids.length;
-  // Abdeckung = share of the AVAILABLE inventory (non-hidden screens) that
-  // falls within radius of any anchor — matched screens ÷ available screens.
-  var nAvail=0;for(var si=0;si<State.screens.length;si++){if(!hid[State.screens[si].partner])nAvail++;}
+  // Abdeckung = share of the AVAILABLE inventory (screens passing all
+  // list/SSP/Publisher/Venue filters) within radius — matched ÷ available.
+  var nAvail=0;for(var si=0;si<State.screens.length;si++){if(screenVisible(State.screens[si]))nAvail++;}
   $("pcAnchors").textContent=fmt(nA);$("pcScreens").textContent=fmt(nScreens);
   $("pcCoverage").textContent=nAvail?(Math.round(1000*nScreens/nAvail)/10+"%"):"–";
   $("pcCoverage").title=fmt(nScreens)+" von "+fmt(nAvail)+" verfügbaren Screens";
@@ -1719,27 +1731,59 @@ function renderScreens(){
   buildScreenIndex();                       // keep the match index in sync
   anchorsActive=Object.keys(State.anchors).length>0; // so fresh clusters colour right
   screenLayer.clearLayers();screenMk={};prevMatched=new Set();var arr=[];
-  State.screens.forEach(function(s){if(State.hidden[s.partner])return;var k=s.partner+"||"+s.screenId;
+  State.screens.forEach(function(s){if(!screenVisible(s))return;var k=s.partner+"||"+s.screenId;
     var m=L.circleMarker([s.lat,s.lng],SC_BASE);m._s=s;m.on("click",screenClick);
     screenMk[k]=m;arr.push(m);});
   screenLayer.addLayers(arr);                   // bulk add (clustered)
   applyHighlight(true);
 }
 function partnerCounts(){var c={};State.screens.forEach(function(s){c[s.partner]=(c[s.partner]||0)+1;});return c;}
+// A screen passes the inventory filters when its partner list is visible AND
+// none of its SSP/Publisher/Venue values is hidden (dimensions AND together).
+var NOVAL="(ohne Angabe)";
+var INV_DIMS=["ssp","publisher","venue"];
+var DIM_LABEL={ssp:"SSP",publisher:"Publisher",venue:"Venue-Typ"};
+function screenVisible(s){
+  if(State.hidden[s.partner])return false;
+  var hf=State.hiddenF;
+  for(var i=0;i<INV_DIMS.length;i++){var d=INV_DIMS[i];if(hf[d][s[d]||NOVAL])return false;}
+  return true;
+}
+function dimCounts(d){var c={};State.screens.forEach(function(s){var v=s[d]||NOVAL;c[v]=(c[v]||0)+1;});return c;}
 function renderPartners(){
-  var c=partnerCounts(),names=Object.keys(c).sort();
-  $("invEmpty").style.display=names.length?"none":"";
+  var names=Object.keys(partnerCounts());
+  $("invEmpty").style.display=State.screens.length?"none":"";
   $("invTotal").textContent=State.screens.length?(fmt(State.screens.length)+" Screens · "+names.length+" Partner"):"";
+  var tab=State.invTab||"partner";
+  Array.prototype.forEach.call($("invTabs").querySelectorAll("button"),function(b){b.classList.toggle("active",b.getAttribute("data-tab")===tab);});
+  if(tab==="partner")renderPartnerRows();else renderDimRows(tab);
+}
+function renderPartnerRows(){
+  var c=partnerCounts(),names=Object.keys(c).sort();
   $("partnerList").innerHTML=names.map(function(p){return '<div class="partner-row'+(State.hidden[p]?" hidden-p":"")+'" data-p="'+esc(p)+'" title="Klick: ein-/ausblenden">'+
     '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(c[p])+'</span>'+
     '<button class="pedit" title="umbenennen">✎</button><button class="px" title="entfernen">✕</button></div>';}).join("");
   Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
     var p=row.getAttribute("data-p");
-    row.addEventListener("click",function(e){if(e.target.closest("button"))return;State.hidden[p]=!State.hidden[p];renderPartners();renderScreens();scheduleMatch();});
+    row.addEventListener("click",function(e){if(e.target.closest("button"))return;State.hidden[p]=!State.hidden[p];idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
     row.querySelector(".pedit").addEventListener("click",function(e){e.stopPropagation();renamePartner(p);});
     row.querySelector(".px").addEventListener("click",function(e){e.stopPropagation();
       if(!confirm('Partner „'+p+'" entfernen?'))return;State.screens=State.screens.filter(function(s){return s.partner!==p;});delete State.hidden[p];
       idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
+  });
+}
+function renderDimRows(dim){
+  var c=dimCounts(dim),vals=Object.keys(c),hf=State.hiddenF[dim];
+  // values sorted by screen count (desc), then name — the big levers first
+  vals.sort(function(a,b){return c[b]-c[a]||a.localeCompare(b,"de");});
+  if(!vals.length||(vals.length===1&&vals[0]===NOVAL)){
+    $("partnerList").innerHTML='<div class="hint">Keine '+DIM_LABEL[dim]+'-Angaben im Inventar. Beim Import die Spalte „'+DIM_LABEL[dim]+'“ zuordnen (Liste ggf. neu hochladen).</div>';return;
+  }
+  $("partnerList").innerHTML=vals.map(function(v){return '<div class="partner-row'+(hf[v]?" hidden-p":"")+'" data-p="'+esc(v)+'" title="Klick: ein-/ausblenden">'+
+    '<span class="pdot"></span><span class="pname">'+esc(v)+'</span><span class="pcount">'+fmt(c[v])+'</span></div>';}).join("");
+  Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
+    var v=row.getAttribute("data-p");
+    row.addEventListener("click",function(){if(hf[v])delete hf[v];else hf[v]=true;idbReplaceAll();renderPartners();renderScreens();scheduleMatch();});
   });
 }
 function renamePartner(old){
@@ -1808,7 +1852,10 @@ var SCREEN_FIELDS=[
  {key:"city",label:"Stadt",req:false,pats:[/^city\s*de$/i,/^city$/i,/^stadt$/i,/^ort$/i]},
  {key:"plz",label:"PLZ",req:false,pats:[/^postcode$/i,/^plz$/i,/^zip/i,/postal/i]},
  {key:"address",label:"Adresse",req:false,pats:[/address\s*\/\s*street/i,/^address$/i,/^street/i,/stra[sß]/i]},
- {key:"format",label:"Format",req:false,pats:[/frame\s*size/i,/venue\s*type/i,/^channel$/i,/^category$/i,/^environment$/i,/format/i]},
+ {key:"ssp",label:"SSP",req:false,pats:[/^ssp$/i,/\bssp\b/i,/supply[\s_-]?side/i,/^exchange$/i]},
+ {key:"publisher",label:"Publisher",req:false,pats:[/^publisher$/i,/publisher/i,/media[\s_-]?owner/i,/vermarkter/i,/^operator$/i]},
+ {key:"venue",label:"Venue-Typ",req:false,pats:[/venue\s*type/i,/^venue$/i,/venue/i,/umfeld/i]},
+ {key:"format",label:"Format",req:false,pats:[/frame\s*size/i,/^channel$/i,/^category$/i,/^environment$/i,/format/i]},
  {key:"partnerCol",label:"Partner-Spalte",req:false,pats:[/^publisher$/i,/^environment$/i,/operator/i,/^partner$/i]}
 ];
 function autoDetect(headers){var m={};SCREEN_FIELDS.forEach(function(f){var found="";for(var p=0;p<f.pats.length&&!found;p++)for(var h=0;h<headers.length&&!found;h++)if(f.pats[p].test(headers[h]))found=headers[h];m[f.key]=found;});return m;}
@@ -1828,7 +1875,7 @@ function buildRecords(partner){var m=currentMapping(),rows=pending.rows,seen={},
   function g(row,f){var c=m[f];return c&&row[c]!=null?String(row[c]).trim()||null:null;}
   rows.forEach(function(row){var id=g(row,"screenId");var lat=parseCoord(m.lat?row[m.lat]:null),lng=parseCoord(m.lng?row[m.lng]:null);
     if(!id||lat==null||lng==null){skipped++;return;}var name=g(row,"name")||g(row,"address")||("Screen "+id);
-    seen[partner+"||"+id]={partner:partner,screenId:id,name:name,lat:lat,lng:lng,city:g(row,"city"),plz:g(row,"plz"),address:g(row,"address"),format:g(row,"format")};});
+    seen[partner+"||"+id]={partner:partner,screenId:id,name:name,lat:lat,lng:lng,city:g(row,"city"),plz:g(row,"plz"),address:g(row,"address"),format:g(row,"format"),ssp:g(row,"ssp"),publisher:g(row,"publisher"),venue:g(row,"venue")};});
   var recs=Object.keys(seen).map(function(k){return seen[k];});return{recs:recs,skipped:skipped,dupes:rows.length-recs.length-skipped};}
 function updateSummary(){var m=currentMapping(),el=$("mapSummary");
   if(!m.screenId||!m.lat||!m.lng){el.className="map-summary bad";el.innerHTML="Bitte <b>Screen-ID</b>, <b>lat</b> und <b>lng</b> zuordnen.";$("mapImport").disabled=true;return;}
@@ -1843,13 +1890,14 @@ function doImport(){var partner=($("mapPartner").value||"").trim();if(!partner){
 
 // ---- export (;-CSV, BOM, CRLF) --------------------------------------------
 function csvCell(v){v=v==null?"":String(v);return /[";\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
-var EXPORT_COLS=["screen_id","partner","name","lat","lng","city","plz","address","format","matched_poi_ids","nearest_poi_id","nearest_distance_m","radius_used_m"];
+var EXPORT_COLS=["screen_id","partner","name","lat","lng","city","plz","address","format","ssp","publisher","venue","matched_poi_ids","nearest_poi_id","nearest_distance_m","radius_used_m"];
 function exportCsv(){
   doMatch();                                  // flush any pending debounced match
   var keys=Object.keys(State.matched);if(!keys.length)return;
   var rows=keys.map(function(k){return State.matched[k];}).sort(function(a,b){return a.s.partner.localeCompare(b.s.partner,"de")||String(a.s.screenId).localeCompare(String(b.s.screenId),"de",{numeric:true});});
   var lines=[EXPORT_COLS.join(";")];
   rows.forEach(function(e){var s=e.s;var rec={screen_id:s.screenId,partner:s.partner,name:s.name,lat:s.lat,lng:s.lng,city:s.city||"",plz:s.plz||"",address:s.address||"",format:s.format||"",
+    ssp:s.ssp||"",publisher:s.publisher||"",venue:s.venue||"",
     matched_poi_ids:e.anchors.slice().sort().join(";"),nearest_poi_id:e.nearId,nearest_distance_m:Math.round(e.nearD),radius_used_m:e.rUsed};
     lines.push(EXPORT_COLS.map(function(c){return csvCell(rec[c]);}).join(";"));});
   var text="﻿"+lines.join("\r\n"),blob=new Blob([text],{type:"text/csv;charset=utf-8;"}),url=URL.createObjectURL(blob);
@@ -1929,10 +1977,11 @@ function idbOpen(){if(_db)return Promise.resolve(_db);return new Promise(functio
 function idbCacheGet(q){return idbOpen().then(function(db){return new Promise(function(res){try{var rq=db.transaction(CACHE,"readonly").objectStore(CACHE).get(q);rq.onsuccess=function(){res(rq.result||null);};rq.onerror=function(){res(null);};}catch(e){res(null);}});}).catch(function(){return null;});}
 function idbCachePut(q,pois){idbOpen().then(function(db){try{db.transaction(CACHE,"readwrite").objectStore(CACHE).put({q:q,pois:pois,ts:Date.now()});}catch(e){}}).catch(function(){});}
 function idbReplaceAll(){if(!idbOK)return;try{idbOpen().then(function(db){var tx=db.transaction(STORE,"readwrite"),os=tx.objectStore(STORE);
-  os.clear();os.put({key:"all",screens:State.screens,hidden:State.hidden});}).catch(function(){});}catch(e){}}
+  os.clear();os.put({key:"all",screens:State.screens,hidden:State.hidden,hiddenF:State.hiddenF});}).catch(function(){});}catch(e){}}
 function idbLoad(){return idbOpen().then(function(db){return new Promise(function(res){var rq=db.transaction(STORE,"readonly").objectStore(STORE).get("all");
   rq.onsuccess=function(){res(rq.result);};rq.onerror=function(){res(null);};});}).then(function(rec){idbOK=true;
-  if(rec&&rec.screens){State.screens=rec.screens;State.hidden=rec.hidden||{};}
+  if(rec&&rec.screens){State.screens=rec.screens;State.hidden=rec.hidden||{};
+    if(rec.hiddenF){INV_DIMS.forEach(function(d){State.hiddenF[d]=rec.hiddenF[d]||{};});}}
   $("persistNote").textContent="Inventar wird in diesem Browser gespeichert.";})
   .catch(function(){idbOK=false;$("persistNote").textContent="Hinweis: Beim Öffnen per Doppelklick wird das Inventar nur für diese Sitzung gehalten.";});}
 
@@ -1956,6 +2005,9 @@ function wire(){
   $("mapPartner").addEventListener("input",updateSummary);
   $("exportBtn").addEventListener("click",exportCsv);
   $("exportPoiBtn").addEventListener("click",exportPoiXlsx);
+  Array.prototype.forEach.call($("invTabs").querySelectorAll("button"),function(b){
+    b.addEventListener("click",function(){State.invTab=b.getAttribute("data-tab");renderPartners();});
+  });
   $("licBtn").addEventListener("click",function(){$("licModal").classList.remove("hidden");});
   $("licClose").addEventListener("click",function(){$("licModal").classList.add("hidden");});
   $("licModal").addEventListener("click",function(e){if(e.target===$("licModal"))$("licModal").classList.add("hidden");});
