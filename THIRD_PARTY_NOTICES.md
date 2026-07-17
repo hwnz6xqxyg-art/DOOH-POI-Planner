@@ -67,6 +67,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### MapLibre GL JS 5.24.0 — BSD-3-Clause
+
+<https://maplibre.org> — © MapLibre contributors; forked from Mapbox GL JS v1,
+© 2016-2020 Mapbox. Full license text:
+<https://github.com/maplibre/maplibre-gl-js/blob/v5.24.0/LICENSE.txt>
+(BSD-3-Clause: redistribution permitted incl. commercially, retain the copyright
+notice, conditions and disclaimer; no endorsement using contributor names.)
+
+### maplibre-gl-leaflet 0.1.3 — ISC
+
+<https://github.com/maplibre/maplibre-gl-leaflet>
+
+```
+Copyright (c) 2021 MapLibre contributors
+Copyright (c) 2014, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+```
+
 ## Map data & services
 
 ### POI data — OpenStreetMap (ODbL 1.0)
@@ -84,16 +113,25 @@ POI discovery queries the **Overpass API** against OpenStreetMap data.
   Moderate interactive use (as in this tool) is fine; sustained heavy or automated
   load should move to a self-hosted Overpass instance.
 
-### Basemap — basemap.de / BKG (dl-de/by-2-0)
+### Basemap — "Positron" style via OpenFreeMap
 
-The background map uses the **basemap.de Web Raster** tiles of the Bundesamt für
-Kartographie und Geodäsie (BKG), licensed under the
-[Datenlizenz Deutschland – Namensnennung – Version 2.0](https://www.govdata.de/dl-de/by-2-0)
-(dl-de/by-2-0): free of charge **including commercial use**, attribution required.
+The background map is the **Positron** style (the open-sourced design originally by
+CARTO, [BSD-licensed style repo](https://github.com/openmaptiles/positron-gl-style)),
+served as vector tiles by **[OpenFreeMap](https://openfreemap.org)** and rendered
+client-side by MapLibre GL:
 
-Required attribution (shown in the map's attribution control): **© basemap.de / BKG**
+- **OpenFreeMap** — public instance is free of charge **including commercial use**,
+  no API keys, no usage caps (donation-financed; self-hosting supported if ever needed).
+- Map schema **© [OpenMapTiles](https://openmaptiles.org)**; data
+  **© OpenStreetMap contributors (ODbL 1.0)**.
+- Required attribution (shown in the map's attribution control):
+  **OpenFreeMap · © OpenMapTiles · Data © OpenStreetMap contributors**
 
-Coverage is Germany (plus border areas) — matching this tool's Germany-only scope.
+**Raster fallback** (no WebGL / style unreachable): OSM standard tiles
+(`tile.openstreetmap.org`), grey-tinted via CSS. Data ODbL as above; the tile service
+is OSMF community infrastructure under the
+[OSMF Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/)
+(interactive light use is fine; heavy/wide distribution should use its own tiles).
 
 ## Backend stack (`api/` + `web/`, optional full-stack variant)
 

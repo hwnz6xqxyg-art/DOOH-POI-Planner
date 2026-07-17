@@ -152,17 +152,20 @@ link (top right):
 | DOOH POI Planner (this code) | MIT | keep the copyright notice |
 | Leaflet 1.9.4 (inlined) | BSD-2-Clause | notice retained in the file |
 | Leaflet.markercluster 1.5.3 (inlined) | MIT | notice retained in the file |
+| MapLibre GL JS 5.24.0 (inlined) | BSD-3-Clause | notice retained in the file |
+| maplibre-gl-leaflet 0.1.3 (inlined) | ISC | notice retained in the file |
 | POI data (OpenStreetMap via Overpass) | ODbL 1.0 | attribution "© OpenStreetMap contributors" — shown on the map and in the POI XLSX export |
-| Basemap tiles (basemap.de / BKG) | dl-de/by-2-0 | attribution "© basemap.de / BKG" — shown on the map |
+| Basemap ("Positron" style via OpenFreeMap) | free incl. commercial, keyless | attribution "OpenFreeMap · © OpenMapTiles · © OpenStreetMap" — shown on the map |
+| Raster fallback (OSM standard tiles) | ODbL data, OSMF fair-use service | attribution shown on the map; light interactive use only |
 
 Notes for re-hosting / heavy use:
 
-- Keep the map attribution control visible (it carries both required attributions).
-- The public **Overpass API** servers are donation-funded, fair-use community
-  infrastructure. Interactive planning use is fine; sustained automated/bulk querying
-  should run against a self-hosted Overpass instance (or the full-stack variant below,
-  which imports Geofabrik extracts instead).
-- basemap.de coverage is Germany only — matching this tool's scope.
+- Keep the map attribution control visible (it carries the required attributions).
+- The public **Overpass API** servers and **OpenFreeMap** are donation-funded
+  community infrastructure. Interactive planning use is fine (OpenFreeMap explicitly
+  has no usage caps); sustained automated/bulk Overpass querying should run against a
+  self-hosted instance (or the full-stack variant below, which imports Geofabrik
+  extracts instead).
 
 ## Project layout
 
