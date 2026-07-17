@@ -731,7 +731,8 @@ input[type=text]:focus{border-color:var(--accent)}
 .seg button:not(.active):hover{color:var(--text)}
 .inv-actions{display:flex;gap:6px;margin-top:6px}.inv-actions button{flex:1;font-size:12px;padding:4px 6px}
 .partners{margin-top:8px}.partner-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:5px;cursor:pointer}
-.partner-row.hidden-p{opacity:.45}.partner-row .pdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word}.partner-row .pcount{flex:0 0 auto;color:var(--muted);font-size:12px}
+.partner-row.hidden-p{opacity:.45}
+.partner-row.zero-p .pdot{background:#9e988a}.partner-row.zero-p .pname,.partner-row.zero-p .pcount{color:var(--muted)}.partner-row .pdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--screen)}.partner-row .pname{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word}.partner-row .pcount{flex:0 0 auto;color:var(--muted);font-size:12px}
 .partner-row .px{flex:0 0 auto;background:none;border:none;color:var(--muted);cursor:pointer}.partner-row .px:hover{color:var(--err)}
 .partner-row .pedit{flex:0 0 auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}.partner-row .pedit:hover{color:var(--accent)}
 .result{margin:8px 0;font-size:13px;min-height:18px}.result.ok{color:var(--ok)}.result.warn{color:var(--warn)}.result.err{color:var(--err)}
@@ -1757,6 +1758,14 @@ function screenVisible(s){
   return true;
 }
 function dimCounts(d){var c={};State.screens.forEach(function(s){var v=s[d]||NOVAL;c[v]=(c[v]||0)+1;});return c;}
+// Faceted counts: does a screen pass every filter EXCEPT the given dimension's
+// own? ("partner" skips the list filter.) Keeps a tab from zeroing itself out.
+function screenVisibleExcept(s,skip){
+  if(skip!=="partner"&&State.hidden[s.partner])return false;
+  for(var i=0;i<INV_DIMS.length;i++){var d=INV_DIMS[i];if(d===skip)continue;if(State.hiddenF[d][s[d]||NOVAL])return false;}
+  return true;
+}
+function visibleCount(){var n=0;State.screens.forEach(function(s){if(screenVisible(s))n++;});return n;}
 // Select/deselect every value of the ACTIVE tab (partner list or a dimension).
 function invSetAll(hideAll){
   var tab=State.invTab||"partner";
@@ -1773,15 +1782,19 @@ function renderPartners(){
   var names=Object.keys(partnerCounts());
   $("invEmpty").style.display=State.screens.length?"none":"";
   $("invActions").style.display=State.screens.length?"":"none";
-  $("invTotal").textContent=State.screens.length?(fmt(State.screens.length)+" Screens · "+names.length+" Partner"):"";
+  var nVis=visibleCount();
+  $("invTotal").textContent=State.screens.length?(fmt(State.screens.length)+" Screens · "+names.length+" Partner"+(nVis<State.screens.length?" · "+fmt(nVis)+" aktiv":"")):"";
   var tab=State.invTab||"partner";
   Array.prototype.forEach.call($("invTabs").querySelectorAll("button"),function(b){b.classList.toggle("active",b.getAttribute("data-tab")===tab);});
   if(tab==="partner")renderPartnerRows();else renderDimRows(tab);
 }
 function renderPartnerRows(){
   var c=partnerCounts(),names=Object.keys(c).sort();
-  $("partnerList").innerHTML=names.map(function(p){return '<div class="partner-row'+(State.hidden[p]?" hidden-p":"")+'" data-p="'+esc(p)+'" title="Klick: ein-/ausblenden">'+
-    '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(c[p])+'</span>'+
+  // faceted: how many of each list's screens survive the OTHER filters
+  var av={};State.screens.forEach(function(s){if(screenVisibleExcept(s,"partner"))av[s.partner]=(av[s.partner]||0)+1;});
+  $("partnerList").innerHTML=names.map(function(p){var a=av[p]||0;
+    return '<div class="partner-row'+(State.hidden[p]?" hidden-p":"")+(a?"":" zero-p")+'" data-p="'+esc(p)+'" title="'+fmt(a)+' von '+fmt(c[p])+' Screens unter den aktuellen Filtern – Klick: ein-/ausblenden">'+
+    '<span class="pdot"></span><span class="pname">'+esc(p)+'</span><span class="pcount">'+fmt(a)+'</span>'+
     '<button class="pedit" title="umbenennen">✎</button><button class="px" title="entfernen">✕</button></div>';}).join("");
   Array.prototype.forEach.call($("partnerList").querySelectorAll(".partner-row"),function(row){
     var p=row.getAttribute("data-p");
@@ -1794,18 +1807,22 @@ function renderPartnerRows(){
 }
 function renderDimRows(dim){
   var c=dimCounts(dim),vals=Object.keys(c),hf=State.hiddenF[dim];
+  // faceted: per-value count of screens surviving all OTHER filters — so e.g.
+  // selecting only one SSP shows which publishers/venues still carry screens
+  var av={};State.screens.forEach(function(s){if(screenVisibleExcept(s,dim)){var v=s[dim]||NOVAL;av[v]=(av[v]||0)+1;}});
   // per-value partner provenance, so tooltips/hints can say WHICH list a value
   // (especially "(ohne Angabe)") comes from
   var byP={};State.screens.forEach(function(s){var v=s[dim]||NOVAL;(byP[v]||(byP[v]={}))[s.partner]=(byP[v][s.partner]||0)+1;});
   function provenance(v){var e=byP[v]||{};return Object.keys(e).sort(function(a,b){return e[b]-e[a];})
     .map(function(p){return p+" ("+fmt(e[p])+")";}).join(" · ");}
-  // values sorted by screen count (desc), then name — the big levers first
-  vals.sort(function(a,b){return c[b]-c[a]||a.localeCompare(b,"de");});
+  // available first (by faceted count desc), zero-availability values last
+  vals.sort(function(a,b){return (av[b]||0)-(av[a]||0)||c[b]-c[a]||a.localeCompare(b,"de");});
   if(!vals.length||(vals.length===1&&vals[0]===NOVAL)){
     $("partnerList").innerHTML='<div class="hint">Keine '+DIM_LABEL[dim]+'-Angaben im Inventar. Beim Import die Spalte „'+DIM_LABEL[dim]+'“ zuordnen (Liste ggf. neu hochladen).</div>';return;
   }
-  var htmlStr=vals.map(function(v){return '<div class="partner-row'+(hf[v]?" hidden-p":"")+'" data-p="'+esc(v)+'" title="aus: '+esc(provenance(v))+' – Klick: ein-/ausblenden">'+
-    '<span class="pdot"></span><span class="pname">'+esc(v)+'</span><span class="pcount">'+fmt(c[v])+'</span></div>';}).join("");
+  var htmlStr=vals.map(function(v){var a=av[v]||0;
+    return '<div class="partner-row'+(hf[v]?" hidden-p":"")+(a?"":" zero-p")+'" data-p="'+esc(v)+'" title="'+fmt(a)+' von '+fmt(c[v])+' unter den aktuellen Filtern · aus: '+esc(provenance(v))+' – Klick: ein-/ausblenden">'+
+    '<span class="pdot"></span><span class="pname">'+esc(v)+'</span><span class="pcount">'+fmt(a)+'</span></div>';}).join("");
   if(c[NOVAL]){
     // name the lists that lack this column so a stale-data hunch resolves itself
     htmlStr+='<div class="hint">„'+NOVAL+'“ stammt aus: '+esc(provenance(NOVAL))+'. Diese Liste(n) haben keine '+DIM_LABEL[dim]+'-Spalte zugeordnet – neu hochladen und die Spalte „'+DIM_LABEL[dim]+'“ zuordnen, oder Liste entfernen.</div>';
