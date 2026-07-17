@@ -139,6 +139,31 @@ End-to-end verified against a real PostGIS instance:
 - ✅ Export: `;`-delimited UTF-8 (BOM) CRLF CSV (German Excel) + per-partner round-trip layout.
 - ✅ SPA builds and runs in a browser, wired to the live API.
 
+## Lizenz & Attribution
+
+**The tool is free for commercial use.** The code is **MIT-licensed**
+([`LICENSE`](./LICENSE)); every bundled library, data source, and service it relies on
+is free of charge including commercial use — full license texts in
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md), summary in the app's **"Lizenzen"**
+link (top right):
+
+| Component | License | Obligation |
+|---|---|---|
+| DOOH POI Planner (this code) | MIT | keep the copyright notice |
+| Leaflet 1.9.4 (inlined) | BSD-2-Clause | notice retained in the file |
+| Leaflet.markercluster 1.5.3 (inlined) | MIT | notice retained in the file |
+| POI data (OpenStreetMap via Overpass) | ODbL 1.0 | attribution "© OpenStreetMap contributors" — shown on the map and in the POI XLSX export |
+| Basemap tiles (basemap.de / BKG) | dl-de/by-2-0 | attribution "© basemap.de / BKG" — shown on the map |
+
+Notes for re-hosting / heavy use:
+
+- Keep the map attribution control visible (it carries both required attributions).
+- The public **Overpass API** servers are donation-funded, fair-use community
+  infrastructure. Interactive planning use is fine; sustained automated/bulk querying
+  should run against a self-hosted Overpass instance (or the full-stack variant below,
+  which imports Geofabrik extracts instead).
+- basemap.de coverage is Germany only — matching this tool's scope.
+
 ## Project layout
 
 ```
