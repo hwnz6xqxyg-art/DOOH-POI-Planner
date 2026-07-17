@@ -1578,9 +1578,10 @@ function buildQuery(scope){
   });
   if(!parts.length)return null;
   var big=scope.type!=="bbox";
-  // 90 s cap even nationwide: healthy servers answer well below it, and it
-  // bounds how long a struggling one can hold the search before failover.
-  var to=big?90:40,lim=big?50000:3000;
+  // Nationwide queries on busy public servers can legitimately take minutes —
+  // give them a 5-min budget rather than killing a slow success. The client
+  // abort timer follows this value (+15 s grace), so true stalls still fail over.
+  var to=big?300:40,lim=big?50000:3000;
   return "[out:json][timeout:"+to+"];"+pre+"("+parts.join("")+");out center tags "+lim+";";
 }
 // Precise brand matching: a term must appear as a WHOLE WORD in the OSM brand
@@ -1655,7 +1656,7 @@ function searchPois(){
   // public server reads as "working on it", not as a hang.
   if(searchTick)clearInterval(searchTick);
   var t0=Date.now(),curMirror=0;
-  var baseMsg=wide?"Landesweite Suche – kann bis ~90 s dauern":"Suche bei OpenStreetMap";
+  var baseMsg=wide?"Landesweite Suche – kann mehrere Minuten dauern":"Suche bei OpenStreetMap";
   function paint(){var s=Math.round((Date.now()-t0)/1000);
     el.textContent=baseMsg+" · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s …";
     setStatus("Overpass-Abfrage läuft · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s");}
