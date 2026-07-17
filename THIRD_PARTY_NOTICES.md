@@ -4,7 +4,7 @@ The DOOH POI Planner itself is MIT-licensed (see [`LICENSE`](./LICENSE)). It bun
 uses, or displays the following third-party software, services, and data. All of them
 are free of charge **including commercial use**, subject to the notices below.
 
-## Bundled libraries (inlined in `standalone/index.html`)
+## Bundled libraries (inlined in `index.html`)
 
 ### Leaflet 1.9.4 — BSD-2-Clause
 
@@ -132,16 +132,3 @@ client-side by MapLibre GL:
 is OSMF community infrastructure under the
 [OSMF Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/)
 (interactive light use is fine; heavy/wide distribution should use its own tiles).
-
-## Backend stack (`api/` + `web/`, optional full-stack variant)
-
-All dependencies are free for commercial use:
-
-| Package | License |
-|---|---|
-| FastAPI, pydantic, Vite, TypeScript, Leaflet (npm) | MIT |
-| uvicorn, pyosmium | BSD |
-| psycopg | LGPL-3.0 (used as a library, unmodified) |
-| PostgreSQL | PostgreSQL License |
-| PostGIS | GPL-2.0 (runs as a separate database server; not linked into this codebase) |
-| Geofabrik OSM extracts | data © OpenStreetMap contributors, ODbL 1.0 |

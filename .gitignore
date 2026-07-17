@@ -1,17 +1,2 @@
-# Python
-api/.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-
-# Node / web
-web/node_modules/
-web/dist/
-
-# Data / secrets
-data/*.osm.pbf
-data/*.osm
-.env
-
-# OS
 .DS_Store
+Thumbs.db
