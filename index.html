@@ -880,7 +880,7 @@ input[type=text]:focus{border-color:var(--accent)}
     <p><b>MapLibre GL JS 5.24.0</b> — BSD-3-Clause, © MapLibre-Mitwirkende (Fork von Mapbox GL JS v1, © 2016–2020 Mapbox) · <a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></p>
     <p><b>maplibre-gl-leaflet 0.1.3</b> — ISC, © 2021 MapLibre-Mitwirkende, © 2014 Mapbox · <a href="https://github.com/maplibre/maplibre-gl-leaflet" target="_blank" rel="noopener">GitHub</a></p>
     <h3>Kartendaten &amp; Dienste</h3>
-    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee; spendenfinanziert, Fair Use — bei intensiver automatisierter Nutzung bitte eigene Instanz betreiben).</p>
+    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee, openstreetmap.fr; spendenfinanziert, Fair Use — bei intensiver automatisierter Nutzung bitte eigene Instanz betreiben).</p>
     <p><b>Hintergrundkarte:</b> Stil „Positron" (Open-Source-Design von CARTO), bereitgestellt von <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> — kostenfrei inkl. kommerzieller Nutzung, ohne API-Key. Kartenschema © <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>, Daten © OpenStreetMap-Mitwirkende (ODbL). Fallback ohne WebGL: OSM-Standard-Kacheln (tile.openstreetmap.org, OSMF Fair Use).</p>
     <p>Vollständige Lizenztexte: <code>THIRD_PARTY_NOTICES.md</code> im Projekt-Repository.</p>
   </div>
@@ -1509,28 +1509,53 @@ function renderBrandChips(){
 var OVERPASS_ENDPOINTS=[
  "https://overpass-api.de/api/interpreter",
  "https://overpass.kumi.systems/api/interpreter",
- "https://overpass.private.coffee/api/interpreter"
+ "https://overpass.private.coffee/api/interpreter",
+ "https://overpass.openstreetmap.fr/api/interpreter"
 ];
+function mirrorLabel(u){try{return new URL(u).hostname.replace(/^overpass\./,"");}catch(e){return "server";}}
+// Aborting a fetch does NOT stop the query server-side — it keeps occupying the
+// per-IP slot for minutes and later searches get instant 429s ("Server 1/n
+// skips immediately"). Before a new search, ask every mirror to drop our
+// zombie queries. Fire-and-forget; no-cors so it works regardless of headers.
+function killMyQueries(){OVERPASS_ENDPOINTS.forEach(function(e){
+  try{fetch(e.replace("/interpreter","/kill_my_queries"),{mode:"no-cors",cache:"no-store"}).catch(function(){});}catch(err){}});}
+// Probe /api/status on all mirrors (6 s cap) and order them healthiest-first
+// for this search. Unreachable mirrors keep their relative order at the tail —
+// a failed probe (e.g. CORS) must not disqualify a working interpreter.
+function probeMirrors(){
+  var t0=Date.now();
+  return Promise.all(OVERPASS_ENDPOINTS.map(function(e){
+    var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
+    var tm=ctl?setTimeout(function(){ctl.abort();},6000):null;
+    return fetch(e.replace("/interpreter","/status"),{signal:ctl?ctl.signal:undefined,cache:"no-store"})
+      .then(function(r){if(tm)clearTimeout(tm);return {e:e,ms:r.ok?Date.now()-t0:Infinity};})
+      .catch(function(){if(tm)clearTimeout(tm);return {e:e,ms:Infinity};});
+  })).then(function(res){
+    var ok=res.filter(function(x){return x.ms<Infinity;}).sort(function(a,b){return a.ms-b.ms;}).map(function(x){return x.e;});
+    var bad=res.filter(function(x){return x.ms===Infinity;}).map(function(x){return x.e;});
+    return ok.concat(bad);
+  });
+}
 // Try each mirror in turn; retry the next on 429 (rate limit) / 5xx / network /
 // stall. Overloaded public mirrors often ACCEPT the connection and then queue
 // silently — without our own abort timer the browser would wait ~5 min per
 // mirror before failing over, which reads as "the search hangs forever". We
 // abort each attempt at the query's own [timeout:N] + 15 s grace instead.
 // onMirror(i) tells the UI which mirror (0-based) is being tried.
-function fetchOverpass(q,idx,onMirror){
-  idx=idx||0;
-  if(idx>=OVERPASS_ENDPOINTS.length)
+function fetchOverpass(q,idx,onMirror,eps){
+  idx=idx||0;eps=eps||OVERPASS_ENDPOINTS;
+  if(idx>=eps.length)
     return Promise.reject(new Error("alle OpenStreetMap-Server gerade ausgelastet – bitte kurz warten oder Gebiet verkleinern."));
   if(onMirror)try{onMirror(idx);}catch(e){}
   // Last mirror = last chance: lift the server budget to 10 min and stretch the
   // client abort to match, instead of giving up on a slow-but-alive query.
   // (Browsers still enforce their own ~5 min ceiling on unanswered requests.)
-  var last=idx===OVERPASS_ENDPOINTS.length-1;
+  var last=idx===eps.length-1;
   var qs=last?q.replace(/\[timeout:\d+\]/,"[timeout:600]"):q;
   var tm=/\[timeout:(\d+)\]/.exec(qs),abortMs=((tm?+tm[1]:60)+15)*1000;
   var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
   var timer=ctl?setTimeout(function(){ctl.abort();},abortMs):null;
-  return fetch(OVERPASS_ENDPOINTS[idx],{method:"POST",body:"data="+encodeURIComponent(qs),signal:ctl?ctl.signal:undefined})
+  return fetch(eps[idx],{method:"POST",body:"data="+encodeURIComponent(qs),signal:ctl?ctl.signal:undefined})
    .then(function(r){
      if(r.status===429||r.status===504||r.status>=500)throw new Error("__retry__");
      if(!r.ok)throw new Error("Overpass HTTP "+r.status);
@@ -1540,7 +1565,7 @@ function fetchOverpass(q,idx,onMirror){
    .catch(function(e){
      if(timer)clearTimeout(timer);
      if(e.message==="__retry__"||e.name==="TypeError"||e.name==="AbortError") // busy / network / stalled -> next mirror
-       return new Promise(function(res){setTimeout(res,700);}).then(function(){return fetchOverpass(q,idx+1,onMirror);});
+       return new Promise(function(res){setTimeout(res,700);}).then(function(){return fetchOverpass(q,idx+1,onMirror,eps);});
      throw e;
    });
 }
@@ -1659,50 +1684,59 @@ function searchPois(){
   }
   el.className="result";
   var wide=scope.type==="area"&&!scope.bundesland&&!scope.city;
-  // Live progress: chunk (nationwide) + mirror + elapsed seconds, so a slow
-  // public server reads as "working on it", not as a hang.
+  // Live progress: chunk (nationwide) + mirror (with hostname) + elapsed
+  // seconds, so a slow public server reads as "working on it", not as a hang.
   if(searchTick)clearInterval(searchTick);
-  var t0=Date.now(),curMirror=0,curChunk=0;
+  var t0=Date.now(),curMirror=0,curChunk=0,eps=OVERPASS_ENDPOINTS.slice();
   function paint(){var s=Math.round((Date.now()-t0)/1000);
     var msg=(wide?"Landesweite Suche · Bundesland "+Math.min(curChunk+1,BUNDESLAENDER.length)+"/"+BUNDESLAENDER.length:"Suche bei OpenStreetMap")
-      +" · Server "+(curMirror+1)+"/"+OVERPASS_ENDPOINTS.length+" · "+s+" s …";
+      +" · Server "+(curMirror+1)+"/"+eps.length+" ("+mirrorLabel(eps[Math.min(curMirror,eps.length-1)])+") · "+s+" s …";
     el.textContent=msg;setStatus("Overpass: "+msg);}
   paint();searchTick=setInterval(paint,1000);
   function done(){if(searchTick){clearInterval(searchTick);searchTick=null;}}
-  function onMirror(i){curMirror=i;paint();}
+  var lastTried=0;
+  function onMirror(i){curMirror=i;lastTried=i;paint();}
+  // A mirror that just served us is the best bet for the NEXT request too —
+  // move it to the front instead of re-knocking on rate-limited ones each time.
+  function promoteWinner(){if(lastTried>0){var w=eps.splice(lastTried,1)[0];eps.unshift(w);}curMirror=0;lastTried=0;}
 
-  if(wide){
-    // 16 Bundesland chunks, sequential (gentle on the shared servers). Each
-    // chunk caches under its own query key — a retry skips finished chunks.
-    var merged=[],seenIds={},allCached=true,ci=0;
-    (function step(){
-      if(ci>=BUNDESLAENDER.length){done();applyPois(merged,scope,allCached);return;}
-      curChunk=ci;curMirror=0;paint();
-      var qc=buildQuery({type:"area",bundesland:BUNDESLAENDER[ci],city:null});
-      idbCacheGet(qc).then(function(cached){
-        if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL)return cached.pois;
-        allCached=false;
-        return fetchOverpass(qc,0,onMirror).then(function(data){
-          var pois=parsePois(data);idbCachePut(qc,pois);
-          return new Promise(function(res){setTimeout(function(){res(pois);},250);});
-        });
-      }).then(function(pois){
-        for(var i=0;i<pois.length;i++){var p=pois[i];if(!seenIds[p.id]){seenIds[p.id]=1;merged.push(p);}}
-        ci++;step();
-      }).catch(function(err){done();el.className="result err";
-        el.textContent="Fehler bei "+BUNDESLAENDER[ci]+": "+(err.message||err)+" – bereits geladene Bundesländer sind zwischengespeichert, einfach erneut suchen.";
-        setStatus("Bereit");});
-    })();
-    return;
-  }
+  killMyQueries();                       // free our zombie slots on all mirrors
+  probeMirrors().then(function(ordered){ // healthiest mirror first for this run
+    eps=ordered;curMirror=0;paint();
 
-  var q=buildQuery(scope);
-  // Cache hit (same query) -> instant; else fetch + store the filtered result.
-  idbCacheGet(q).then(function(cached){
-    if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){done();applyPois(cached.pois,scope,true);return;}
-    return fetchOverpass(q,0,onMirror).then(function(data){
-      done();var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
-  }).catch(function(err){done();el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
+    if(wide){
+      // 16 Bundesland chunks, sequential (gentle on the shared servers). Each
+      // chunk caches under its own query key — a retry skips finished chunks.
+      var merged=[],seenIds={},allCached=true,ci=0;
+      (function step(){
+        if(ci>=BUNDESLAENDER.length){done();applyPois(merged,scope,allCached);return;}
+        curChunk=ci;curMirror=0;lastTried=0;paint();
+        var qc=buildQuery({type:"area",bundesland:BUNDESLAENDER[ci],city:null});
+        idbCacheGet(qc).then(function(cached){
+          if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL)return cached.pois;
+          allCached=false;
+          return fetchOverpass(qc,0,onMirror,eps).then(function(data){
+            var pois=parsePois(data);idbCachePut(qc,pois);promoteWinner();
+            return new Promise(function(res){setTimeout(function(){res(pois);},250);});
+          });
+        }).then(function(pois){
+          for(var i=0;i<pois.length;i++){var p=pois[i];if(!seenIds[p.id]){seenIds[p.id]=1;merged.push(p);}}
+          ci++;step();
+        }).catch(function(err){done();el.className="result err";
+          el.textContent="Fehler bei "+BUNDESLAENDER[ci]+": "+(err.message||err)+" – bereits geladene Bundesländer sind zwischengespeichert, einfach erneut suchen.";
+          setStatus("Bereit");});
+      })();
+      return;
+    }
+
+    var q=buildQuery(scope);
+    // Cache hit (same query) -> instant; else fetch + store the filtered result.
+    idbCacheGet(q).then(function(cached){
+      if(cached&&cached.pois&&(Date.now()-cached.ts)<POI_TTL){done();applyPois(cached.pois,scope,true);return;}
+      return fetchOverpass(q,0,onMirror,eps).then(function(data){
+        done();var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
+    }).catch(function(err){done();el.className="result err";el.textContent="Fehler: "+(err.message||err);setStatus("Bereit");});
+  });
 }
 var searchTick=null;
 

@@ -108,7 +108,7 @@ POI discovery queries the **Overpass API** against OpenStreetMap data.
   maps and shared data extracts. The tool shows it in the map attribution and adds a
   source note to the POI XLSX export.
 - Service: the public Overpass instances used
-  (`overpass-api.de`, `overpass.kumi.systems`, `overpass.private.coffee`)
+  (`overpass-api.de`, `overpass.kumi.systems`, `overpass.private.coffee`, `overpass.openstreetmap.fr`)
   are donation-funded community infrastructure operated under fair-use policies.
   Moderate interactive use (as in this tool) is fine; sustained heavy or automated
   load should move to a self-hosted Overpass instance.
