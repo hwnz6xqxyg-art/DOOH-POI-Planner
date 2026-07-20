@@ -880,7 +880,7 @@ input[type=text]:focus{border-color:var(--accent)}
     <p><b>MapLibre GL JS 5.24.0</b> — BSD-3-Clause, © MapLibre-Mitwirkende (Fork von Mapbox GL JS v1, © 2016–2020 Mapbox) · <a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></p>
     <p><b>maplibre-gl-leaflet 0.1.3</b> — ISC, © 2021 MapLibre-Mitwirkende, © 2014 Mapbox · <a href="https://github.com/maplibre/maplibre-gl-leaflet" target="_blank" rel="noopener">GitHub</a></p>
     <h3>Kartendaten &amp; Dienste</h3>
-    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee, openstreetmap.fr; spendenfinanziert, Fair Use — bei intensiver automatisierter Nutzung bitte eigene Instanz betreiben).</p>
+    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Landesweite Suchen nutzen bevorzugt ein monatlich vorbereitetes Datenpaket (OSM-Auszug via <a href="https://download.geofabrik.de/" target="_blank" rel="noopener">Geofabrik</a>) aus dem Projekt-Repository; sonst Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee, openstreetmap.fr; spendenfinanziert, Fair Use).</p>
     <p><b>Hintergrundkarte:</b> Stil „Positron" (Open-Source-Design von CARTO), bereitgestellt von <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> — kostenfrei inkl. kommerzieller Nutzung, ohne API-Key. Kartenschema © <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>, Daten © OpenStreetMap-Mitwirkende (ODbL). Fallback ohne WebGL: OSM-Standard-Kacheln (tile.openstreetmap.org, OSMF Fair Use).</p>
     <p>Vollständige Lizenztexte: <code>THIRD_PARTY_NOTICES.md</code> im Projekt-Repository.</p>
   </div>
@@ -1713,6 +1713,58 @@ function applyPois(pois,scope,fromCache){
 // well under every server/browser limit, individually cached (a failed run
 // resumes where it stopped), with chunk progress in the status line.
 var BUNDESLAENDER=["Baden-Württemberg","Bayern","Berlin","Brandenburg","Bremen","Hamburg","Hessen","Mecklenburg-Vorpommern","Niedersachsen","Nordrhein-Westfalen","Rheinland-Pfalz","Saarland","Sachsen","Sachsen-Anhalt","Schleswig-Holstein","Thüringen"];
+// ---- static POI dataset (preferred for nationwide searches) ----------------
+// Monthly-built shards (see .github/workflows/build-poi-data.yml) published on
+// the repo's poi-data branch: per-category files + brands.json (every branded
+// POI). Loading a few static files replaces the heaviest Overpass queries —
+// no rate limits, seconds instead of minutes. Overpass stays as fallback when
+// the dataset is missing (Action never run) or unreachable.
+var POI_DATA_BASE="https://raw.githubusercontent.com/hwnz6xqxyg-art/DOOH-POI-Planner/poi-data/";
+function fetchStatic(name){
+  var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
+  var tm=ctl?setTimeout(function(){ctl.abort();},25000):null;
+  return fetch(POI_DATA_BASE+name,{signal:ctl?ctl.signal:undefined})
+    .then(function(r){if(tm)clearTimeout(tm);if(!r.ok)return null;return r.json();})
+    .catch(function(){if(tm)clearTimeout(tm);return null;});
+}
+// Resolve the current filters against the static shards. Same semantics as the
+// live path: ticked category = ALL of it; brand chip = whole-word brand match,
+// optionally narrowed to its category. Returns {pois,generated} or null when
+// the dataset is unavailable (callers then fall back to Overpass).
+function tryStaticNationwide(){
+  return fetchStatic("manifest.json").then(function(man){
+    if(!man)return null;
+    var catKeys=CATEGORIES.filter(function(c){return State.cats[c.key];}).map(function(c){return c.key;});
+    var chips=State.brands;
+    var loads=catKeys.map(function(k){return fetchStatic("cat-"+k+".json").then(function(rows){return rows&&{kind:"cat",key:k,rows:rows};});});
+    if(chips.length)loads.push(fetchStatic("brands.json").then(function(rows){return rows&&{kind:"brands",rows:rows};}));
+    return Promise.all(loads).then(function(results){
+      if(results.some(function(r){return !r;}))return null;    // a shard failed -> Overpass fallback
+      var seen={},pois=[];
+      function push(id,name,brand,lat,lng,lbl){
+        if(seen[id])return;seen[id]=1;
+        pois.push({id:id,name:name||brand||lbl||"POI",brand:brand||null,cat:lbl||"POI",lat:lat,lng:lng});
+      }
+      results.forEach(function(r){
+        if(r.kind!=="cat")return;
+        var lbl=CATMAP[r.key]?CATMAP[r.key].label:"POI";
+        r.rows.forEach(function(w){push(w[0],w[1],w[2],w[3],w[4],lbl);});
+      });
+      results.forEach(function(r){
+        if(r.kind!=="brands")return;
+        chips.forEach(function(ch){
+          var test=makeBrandTest([ch.term]);
+          for(var i=0;i<r.rows.length;i++){var w=r.rows[i];
+            if(!test(w[2]))continue;
+            if(ch.cat&&w[5]!==ch.cat)continue;                  // chip narrowed to a category
+            push(w[0],w[1],w[2],w[3],w[4],w[5]&&CATMAP[w[5]]?CATMAP[w[5]].label:"POI");
+          }
+        });
+      });
+      return {pois:pois,generated:man.generated||null};
+    });
+  }).catch(function(){return null;});
+}
 function searchPois(){
   var el=$("result");
   var scopeVal=$("scope").value, city=($("city").value||"").trim();
@@ -1749,12 +1801,13 @@ function searchPois(){
   function paint(){var s=Math.round((Date.now()-t0)/1000);
     var head;
     if(waitLeft>0)head="Server ausgelastet – neuer Versuch in "+waitLeft+" s";
+    else if(phase==="static")head="Lade POI-Datenpaket";
     else if(!wide)head="Suche bei OpenStreetMap";
     else if(phase==="count")head="Prüfe Umfang der Suche";
     else if(phase==="batch")head="Lade ~"+fmt(expTotal)+" Treffer · Paket "+Math.min(curBatch+1,nBatches)+"/"+nBatches;
     else head="Landesweite Suche · Bundesland "+Math.min(curChunk+1,BUNDESLAENDER.length)+"/"+BUNDESLAENDER.length;
-    var msg=head+(waitLeft>0?"":" · Server "+(curMirror+1)+"/"+eps.length+" ("+mirrorLabel(eps[Math.min(curMirror,eps.length-1)])+")")+" · "+s+" s …";
-    el.textContent=msg;setStatus("Overpass: "+msg);}
+    var msg=head+((waitLeft>0||phase==="static")?"":" · Server "+(curMirror+1)+"/"+eps.length+" ("+mirrorLabel(eps[Math.min(curMirror,eps.length-1)])+")")+" · "+s+" s …";
+    el.textContent=msg;setStatus((phase==="static"?"":"Overpass: ")+msg);}
   var myTick=setInterval(paint,1000);searchTick=myTick;paint();
   function done(){clearInterval(myTick);if(searchTick===myTick)searchTick=null;}
   var lastTried=0;
@@ -1766,6 +1819,20 @@ function searchPois(){
   function fail(err,prefix){if(err&&err.message==="__stale__")return;done();
     el.className="result err";el.textContent=(prefix||"Fehler: ")+(err&&err.message||err);setStatus("Bereit");}
 
+  // Nationwide: try the static dataset first — a few cached file loads instead
+  // of the heaviest Overpass queries. Falls through to Overpass when absent.
+  if(wide){
+    phase="static";paint();
+    tryStaticNationwide().then(function(r){
+      if(stale())return;
+      if(r&&r.pois){done();applyPois(r.pois,scope,false);
+        if(r.generated)el.textContent+=" · Datenstand "+r.generated;
+        return;}
+      phase="";runOverpass();
+    });
+  }else runOverpass();
+
+  function runOverpass(){
   killMyQueries();                       // free our zombie slots on all mirrors
   probeMirrors().then(function(ordered){ // healthiest mirror first for this run
     if(stale())return;
@@ -1852,6 +1919,7 @@ function searchPois(){
         if(stale())return;done();var pois=parsePois(data);applyPois(pois,scope,false);idbCachePut(q,pois);});
     }).catch(function(err){fail(err);});
   }).catch(function(err){fail(err);});
+  }
 }
 var searchTick=null;
 

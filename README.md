@@ -37,6 +37,25 @@ range: deduped, mapped, counted, and exportable.
 - **Everything stays in your browser** — inventory and settings persist locally
   (IndexedDB); nothing is uploaded anywhere except the POI queries to OpenStreetMap.
 
+## Statische POI-Daten (empfohlen für „Ganz Deutschland")
+
+Nationwide searches are the heaviest thing the public Overpass servers can be asked
+for — on busy days they queue or rate-limit. The repo therefore ships a data pipeline
+that pre-builds the POI dataset, and **the app automatically prefers it**:
+
+- **One-time setup:** in the GitHub repo, open **Actions → "Build POI data" → Run
+  workflow**. It downloads the Geofabrik Germany extract, filters the app's categories
+  plus every branded POI, and publishes compact JSON shards to the `poi-data` branch
+  (~30–60 min). It then re-runs monthly by itself.
+- From then on, "Ganz Deutschland" searches load those shards in **seconds** — no rate
+  limits, no queues — and show their `Datenstand` next to the result.
+- No setup / branch missing / offline? The app **falls back to live Overpass**
+  automatically. Bundesland/city/map-view searches always use live Overpass (they are
+  small and fast).
+
+Data license is unchanged: © OpenStreetMap contributors, ODbL 1.0 (extract via
+[Geofabrik](https://download.geofabrik.de/), free incl. commercial use).
+
 ## Lizenz & Attribution
 
 **Free for commercial use.** The code is **MIT-licensed** ([`LICENSE`](./LICENSE)); every

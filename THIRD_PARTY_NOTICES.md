@@ -112,6 +112,12 @@ POI discovery queries the **Overpass API** against OpenStreetMap data.
   are donation-funded community infrastructure operated under fair-use policies.
   Moderate interactive use (as in this tool) is fine; sustained heavy or automated
   load should move to a self-hosted Overpass instance.
+- Static dataset: nationwide searches prefer a monthly pre-built shard set derived
+  from the [Geofabrik](https://download.geofabrik.de/) `germany-latest` extract
+  (free download service; data © OpenStreetMap contributors, ODbL 1.0). Built by
+  `.github/workflows/build-poi-data.yml` + `pipeline/compact.js` using
+  [osmium-tool](https://osmcode.org/osmium-tool/) (GPL-3.0, used as a build tool
+  on CI only — not distributed with the app).
 
 ### Basemap — "Positron" style via OpenFreeMap
 

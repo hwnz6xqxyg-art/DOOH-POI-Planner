@@ -1,0 +1,55 @@
+# Builds the static POI dataset the app prefers for nationwide searches.
+# Runs monthly (and on demand via the Actions tab -> "Run workflow").
+# Publishes compact JSON shards to the orphan branch `poi-data`, which the app
+# fetches via raw.githubusercontent.com. Force-push keeps that branch tiny
+# (no data history). Data: © OpenStreetMap contributors, ODbL 1.0, via Geofabrik.
+name: Build POI data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 3 * *"   # 03:17 UTC on the 3rd of every month
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install osmium-tool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends osmium-tool
+
+      - name: Download Geofabrik Germany extract (~4 GB)
+        run: curl -fL --retry 3 --retry-delay 30 -o germany.osm.pbf https://download.geofabrik.de/europe/germany-latest.osm.pbf
+
+      - name: Filter relevant POIs (categories + every branded POI)
+        run: |
+          osmium tags-filter -o filtered.osm.pbf germany.osm.pbf \
+            nwr/shop=chemist,perfumery,cosmetics,hairdresser,supermarket,electronics,clothes,mall,department_store \
+            nwr/amenity=pharmacy,university,college,cinema \
+            nwr/leisure=fitness_centre \
+            nwr/railway=station,halt \
+            nwr/aeroway=aerodrome \
+            nwr/brand
+
+      - name: Export to GeoJSONseq
+        run: osmium export filtered.osm.pbf -f geojsonseq -o filtered.geojsonseq --add-unique-id=type_id --geometry-types=point,polygon
+
+      - name: Build shards
+        run: node pipeline/compact.js filtered.geojsonseq out
+
+      - name: Publish to the poi-data branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git init -b poi-data
+          git config user.name "poi-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add .
+          git commit -m "POI data $(date -u +%F)"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" poi-data
