@@ -721,12 +721,13 @@ input[type=text]:focus{border-color:var(--accent)}
 .btn:hover{border-color:var(--accent)}.btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.sm{padding:6px 9px;font-size:12px}.btn.full{width:100%}.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:600}.btn.primary:hover{border-color:var(--accent)}.btn.ghost{background:transparent}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.chip{background:var(--accent);color:var(--on-accent);border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer}.chip::after{content:" ✕";opacity:.8}
-.cats-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;user-select:none}
-.cats-sum::-webkit-details-marker{display:none}
-.cats-sum .chev{display:inline-block;transition:transform .15s;color:var(--muted);font-size:11px}
-#catsBox[open] .cats-sum .chev{transform:rotate(90deg)}
-#catsBox .cats{margin-top:2px}
-#catsBox:not([open]) .cats{display:none}   /* explicit: don't rely on UA details behavior */
+.catdrop{position:relative}
+.catdrop-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);cursor:pointer;font-size:13px;text-align:left}
+.catdrop-btn:hover{border-color:var(--accent)}.catdrop-btn .caret{color:var(--muted);font-size:11px;flex:0 0 auto}
+.catdrop-btn #catsCount{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.catdrop-panel{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:900;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.catdrop-panel .cats{max-height:240px;overflow-y:auto;margin-top:6px}
+.catdrop-actions{display:flex;gap:6px;margin-top:6px}.catdrop-actions button{flex:1;font-size:12px;padding:4px 6px}
 .cats{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .cats label{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}.cats input{accent-color:var(--accent)}
 .selin{padding:8px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);outline:none}.selin:focus{border-color:var(--accent)}
@@ -797,10 +798,18 @@ input[type=text]:focus{border-color:var(--accent)}
       <div class="hint"><b>Marke</b> eintragen, optional eine <b>Kategorie für diese Marke</b> wählen (Standard: alle), dann „+". Beispiel: <b>DM · nur Drogerie</b>. <b>Kategorien</b> unten (Häkchen) = alle Filialen dieser Art. So holst du z. B. <b>DM (nur Drogerie) + Häkchen bei Apotheke</b> = nur DM-Drogerien + alle Apotheken.</div>
     </div>
     <div class="block">
-      <details id="catsBox" open>
-        <summary class="lbl cats-sum"><span class="chev">▸</span>Kategorien <span id="catsCount" style="text-transform:none;color:var(--muted)"></span></summary>
-        <div id="cats" class="cats"></div>
-      </details>
+      <label class="lbl">Kategorien <span style="text-transform:none;color:var(--muted)">(= alle Filialen dieser Art)</span></label>
+      <div id="catDrop" class="catdrop">
+        <button id="catTrigger" type="button" class="catdrop-btn"><span id="catsCount">Keine ausgewählt</span><span class="caret">▾</span></button>
+        <div id="catPanel" class="catdrop-panel hidden">
+          <input id="catFilter" type="text" placeholder="Kategorie suchen …" autocomplete="off" />
+          <div class="catdrop-actions">
+            <button id="catSelAll" type="button" class="btn sm ghost">Alle auswählen</button>
+            <button id="catDeselAll" type="button" class="btn sm ghost">Alle abwählen</button>
+          </div>
+          <div id="cats" class="cats"></div>
+        </div>
+      </div>
     </div>
     <div class="block">
       <label class="lbl">Gebiet</label>
@@ -1489,8 +1498,10 @@ function setRadius(m,fromSlider){
 
 // ---- categories UI --------------------------------------------------------
 function updateCatsCount(){
-  var n=CATEGORIES.filter(function(c){return State.cats[c.key];}).length;
-  $("catsCount").textContent=n?"· "+n+" ausgewählt":"(= alle Filialen dieser Art)";
+  var sel=CATEGORIES.filter(function(c){return State.cats[c.key];});
+  $("catsCount").textContent=sel.length===0?"Keine ausgewählt (nur Marken)"
+    :sel.length<=2?sel.map(function(c){return c.label;}).join(", ")
+    :sel.length+" ausgewählt";
 }
 function renderCats(){
   $("cats").innerHTML=CATEGORIES.map(function(c){
@@ -2473,10 +2484,23 @@ function wire(){
   });
   $("invSelAll").addEventListener("click",function(){invSetAll(false);});
   $("invDeselAll").addEventListener("click",function(){invSetAll(true);});
-  // categories collapse state survives sessions (best effort — file:// quirks ok)
-  var cb=$("catsBox");
-  try{if(localStorage.getItem("catsOpen")==="0")cb.removeAttribute("open");}catch(e){}
-  cb.addEventListener("toggle",function(){try{localStorage.setItem("catsOpen",cb.open?"1":"0");}catch(e){}});
+  // category dropdown: Gebiet-style trigger, free-text filter, bulk actions
+  var catDrop=$("catDrop"),catPanel=$("catPanel"),catFilter=$("catFilter");
+  function catOpen(o){catPanel.classList.toggle("hidden",!o);
+    if(o){catFilter.value="";catApplyFilter();try{catFilter.focus();}catch(e){}}}
+  function catApplyFilter(){var q=catFilter.value.trim().toLowerCase();
+    Array.prototype.forEach.call($("cats").querySelectorAll("label"),function(l){
+      l.style.display=(!q||l.textContent.toLowerCase().indexOf(q)>=0)?"":"none";});}
+  // bulk actions act on the currently VISIBLE (filtered) categories
+  function catBulk(sel){Array.prototype.forEach.call($("cats").querySelectorAll("label"),function(l){
+    if(l.style.display==="none")return;var cb2=l.querySelector("input");
+    if(cb2.checked!==sel){cb2.checked=sel;State.cats[cb2.getAttribute("data-k")]=sel;}});updateCatsCount();}
+  $("catTrigger").addEventListener("click",function(){catOpen(catPanel.classList.contains("hidden"));});
+  document.addEventListener("click",function(e){if(!catDrop.contains(e.target))catOpen(false);});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")catOpen(false);});
+  catFilter.addEventListener("input",catApplyFilter);
+  $("catSelAll").addEventListener("click",function(){catBulk(true);});
+  $("catDeselAll").addEventListener("click",function(){catBulk(false);});
   $("licBtn").addEventListener("click",function(){$("licModal").classList.remove("hidden");});
   $("licClose").addEventListener("click",function(){$("licModal").classList.add("hidden");});
   $("licModal").addEventListener("click",function(e){if(e.target===$("licModal"))$("licModal").classList.add("hidden");});
