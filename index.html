@@ -888,7 +888,7 @@ input[type=text]:focus{border-color:var(--accent)}
     <p><b>MapLibre GL JS 5.24.0</b> — BSD-3-Clause, © MapLibre-Mitwirkende (Fork von Mapbox GL JS v1, © 2016–2020 Mapbox) · <a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></p>
     <p><b>maplibre-gl-leaflet 0.1.3</b> — ISC, © 2021 MapLibre-Mitwirkende, © 2014 Mapbox · <a href="https://github.com/maplibre/maplibre-gl-leaflet" target="_blank" rel="noopener">GitHub</a></p>
     <h3>Kartendaten &amp; Dienste</h3>
-    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Landesweite Suchen nutzen bevorzugt ein monatlich vorbereitetes Datenpaket (OSM-Auszug via <a href="https://download.geofabrik.de/" target="_blank" rel="noopener">Geofabrik</a>) aus dem Projekt-Repository; sonst Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee, openstreetmap.fr; spendenfinanziert, Fair Use).</p>
+    <p><b>POI-Daten:</b> © OpenStreetMap-Mitwirkende, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> — frei auch für kommerzielle Nutzung, Attribution erforderlich. Landesweite Suchen nutzen bevorzugt ein monatlich vorbereitetes Datenpaket (OSM-Auszug via <a href="https://download.geofabrik.de/" target="_blank" rel="noopener">Geofabrik</a>) aus dem Projekt-Repository; sonst Abfrage über die öffentlichen Overpass-API-Server (overpass-api.de, kumi.systems, private.coffee, openstreetmap.fr; spendenfinanziert, Fair Use). Stadt-/Bundesland-Umrisse: <a href="https://nominatim.openstreetmap.org" target="_blank" rel="noopener">Nominatim</a> (OSM-Geocoder, Fair Use, Ergebnisse zwischengespeichert).</p>
     <p><b>Hintergrundkarte:</b> Stil „Positron" (Open-Source-Design von CARTO), bereitgestellt von <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> — kostenfrei inkl. kommerzieller Nutzung, ohne API-Key. Kartenschema © <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>, Daten © OpenStreetMap-Mitwirkende (ODbL). Fallback ohne WebGL: OSM-Standard-Kacheln (tile.openstreetmap.org, OSMF Fair Use).</p>
     <p>Vollständige Lizenztexte: <code>THIRD_PARTY_NOTICES.md</code> im Projekt-Repository.</p>
   </div>
@@ -1781,10 +1781,75 @@ function staticShard(name,gen){
     });
   });
 }
+// ---- boundary lookup so city/Bundesland scopes can use the static data -----
+// One tiny Nominatim geocoding request resolves the admin boundary (simplified
+// polygon); cached like everything else. OSM data, fair-use service — one
+// request per unique place per two weeks is far under its 1 req/s policy.
+function idbCachePutData(q,data){idbOpen().then(function(db){try{db.transaction(CACHE,"readwrite").objectStore(CACHE).put({q:q,data:data,ts:Date.now()});}catch(e){}}).catch(function(){});}
+function nominatimBoundary(scope){
+  var key="geo::"+(scope.bundesland||"")+"||"+(scope.city||"");
+  return idbCacheGet(key).then(function(rec){
+    if(rec&&rec.data&&(Date.now()-rec.ts)<POI_TTL)return rec.data;
+    var qs="format=jsonv2&limit=1&polygon_geojson=1&polygon_threshold=0.002&country=Deutschland";
+    if(scope.city)qs+="&city="+encodeURIComponent(scope.city);
+    if(scope.bundesland)qs+="&state="+encodeURIComponent(scope.bundesland);
+    var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
+    var tm=ctl?setTimeout(function(){ctl.abort();},10000):null;
+    return fetch("https://nominatim.openstreetmap.org/search?"+qs,{signal:ctl?ctl.signal:undefined})
+      .then(function(r){if(tm)clearTimeout(tm);if(!r.ok)return null;return r.json();})
+      .then(function(js){
+        var hit=js&&js[0],g=hit&&hit.geojson;
+        if(!g||(g.type!=="Polygon"&&g.type!=="MultiPolygon"))return null;  // need an area, not a pin
+        var bb=(hit.boundingbox||[]).map(Number);
+        var data={geom:g,bbox:bb.length===4?bb:null};   // bbox: [latMin,latMax,lonMin,lonMax]
+        idbCachePutData(key,data);
+        return data;
+      }).catch(function(){if(tm)clearTimeout(tm);return null;});
+  });
+}
+// even-odd point-in-polygon over all rings (holes handled implicitly)
+function pointInRing(lat,lng,ring){var inside=false;
+  for(var i=0,j=ring.length-1;i<ring.length;j=i++){
+    var xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    if(((yi>lat)!==(yj>lat))&&(lng<(xj-xi)*(lat-yi)/(yj-yi)+xi))inside=!inside;
+  }return inside;}
+function pointInGeom(lat,lng,g){
+  var polys=g.type==="Polygon"?[g.coordinates]:g.type==="MultiPolygon"?g.coordinates:[];
+  for(var p=0;p<polys.length;p++){var cnt=0;
+    for(var r=0;r<polys[p].length;r++)if(pointInRing(lat,lng,polys[p][r]))cnt++;
+    if(cnt%2===1)return true;
+  }return false;}
 // Resolve the current filters against the static shards. Same semantics as the
 // live path: ticked category = ALL of it; brand chip = whole-word brand match,
-// optionally narrowed to its category. Returns {pois,generated} or null when
-// the dataset is unavailable (callers then fall back to Overpass).
+// optionally narrowed to its category — then a geographic filter per scope:
+// bbox numerically, city/Bundesland via the geocoded boundary (point-in-
+// polygon), nationwide unfiltered. Returns {pois,generated} or null when the
+// dataset (or the boundary) is unavailable — callers fall back to Overpass.
+function tryStaticSearch(scope){
+  var geoP;
+  if(scope.type==="bbox"){
+    var b=String(scope.bbox).split(",").map(Number);      // S,W,N,E
+    geoP=Promise.resolve({box:b});
+  }else if(scope.bundesland||scope.city){
+    geoP=nominatimBoundary(scope).then(function(g){return g?{poly:g}:null;});
+  }else geoP=Promise.resolve({all:true});
+  return geoP.then(function(geo){
+    if(!geo)return null;                                  // boundary unresolvable -> Overpass
+    return tryStaticNationwide().then(function(r){
+      if(!r||!r.pois)return null;
+      if(geo.all)return r;
+      var out=[];
+      for(var i=0;i<r.pois.length;i++){var p=r.pois[i];
+        if(geo.box){var bx=geo.box;if(p.lat<bx[0]||p.lat>bx[2]||p.lng<bx[1]||p.lng>bx[3])continue;}
+        else if(geo.poly){var bb=geo.poly.bbox;
+          if(bb&&(p.lat<bb[0]||p.lat>bb[1]||p.lng<bb[2]||p.lng>bb[3]))continue;  // cheap prefilter
+          if(!pointInGeom(p.lat,p.lng,geo.poly.geom))continue;}
+        out.push(p);
+      }
+      return {pois:out,generated:r.generated};
+    });
+  });
+}
 function tryStaticNationwide(){
   return staticManifest().then(function(man){
     if(!man)return null;
@@ -1828,15 +1893,12 @@ function searchPois(){
   var scope;
   if(scopeVal==="view"){
     var b=map.getBounds();
-    // Guard against over-large bbox queries (the public API can't serve them).
+    // Over-large bboxes are fine for the static dataset but not for the public
+    // Overpass servers — flag it and enforce only on the live fallback.
     var latSpan=b.getNorth()-b.getSouth(),lngSpan=b.getEast()-b.getWest();
     var latLim=hasCat?2.0:5.0,lngLim=hasCat?3.0:7.0;
-    if(latSpan>latLim||lngSpan>lngLim){
-      el.className="result warn";
-      el.textContent="Gebiet zu groß – näher heranzoomen, oder oben ein Bundesland/Stadt wählen.";
-      toast("Bitte näher heranzoomen oder ein Bundesland/Stadt wählen.","warn");return;
-    }
-    scope={type:"bbox",bbox:b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5)};
+    scope={type:"bbox",bbox:b.getSouth().toFixed(5)+","+b.getWest().toFixed(5)+","+b.getNorth().toFixed(5)+","+b.getEast().toFixed(5),
+      tooBig:(latSpan>latLim||lngSpan>lngLim)};
   }else{
     var bl=scopeVal==="DE"?null:scopeVal;
     scope={type:"area",bundesland:bl,city:city||null};
@@ -1875,18 +1937,24 @@ function searchPois(){
 
   // Nationwide: try the static dataset first — a few cached file loads instead
   // of the heaviest Overpass queries. Falls through to Overpass when absent.
-  if(wide){
-    phase="static";paint();
-    tryStaticNationwide().then(function(r){
-      if(stale())return;
-      if(r&&r.pois){done();applyPois(r.pois,scope,false);
-        if(r.generated)el.textContent+=" · Datenstand "+r.generated;
-        return;}
-      // Say WHY it's about to be slow — a silent fallback reads as "broken".
-      toast("POI-Datenpaket nicht erreichbar (Repo privat? Workflow noch nicht gelaufen?) – nutze Overpass-Server, das dauert länger.","warn");
-      phase="";runOverpass();
-    });
-  }else runOverpass();
+  // Every scope tries the static dataset first: nationwide unfiltered, map
+  // view via bbox, Bundesland/Stadt via a geocoded boundary. Overpass only
+  // when the dataset (or the boundary) is unavailable.
+  phase="static";paint();
+  tryStaticSearch(scope).then(function(r){
+    if(stale())return;
+    if(r&&r.pois){done();applyPois(r.pois,scope,false);
+      if(r.generated)el.textContent+=" · Datenstand "+r.generated;
+      return;}
+    // Say WHY the heavy path is about to be slow — silent fallback reads as
+    // "broken". Small scopes fall back quietly (Overpass handles them fine).
+    if(wide)toast("POI-Datenpaket nicht erreichbar (Repo privat? Workflow noch nicht gelaufen?) – nutze Overpass-Server, das dauert länger.","warn");
+    phase="";
+    if(scope.type==="bbox"&&scope.tooBig){done();el.className="result warn";
+      el.textContent="Gebiet zu groß für die Live-Abfrage – näher heranzoomen, oder oben Bundesland/Stadt wählen.";
+      setStatus("Bereit");return;}
+    runOverpass();
+  });
 
   function runOverpass(){
   killMyQueries();                       // free our zombie slots on all mirrors

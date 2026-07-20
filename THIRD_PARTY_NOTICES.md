@@ -112,6 +112,11 @@ POI discovery queries the **Overpass API** against OpenStreetMap data.
   are donation-funded community infrastructure operated under fair-use policies.
   Moderate interactive use (as in this tool) is fine; sustained heavy or automated
   load should move to a self-hosted Overpass instance.
+- Boundary lookup: city/Bundesland scopes on the static dataset resolve their
+  admin boundary via [Nominatim](https://nominatim.openstreetmap.org)
+  (OSMF service, [usage policy](https://operations.osmfoundation.org/policies/nominatim/):
+  light use with caching — the app sends at most one lookup per unique place per
+  two weeks; data ODbL as above).
 - Static dataset: nationwide searches prefer a monthly pre-built shard set derived
   from the [Geofabrik](https://download.geofabrik.de/) `germany-latest` extract
   (free download service; data © OpenStreetMap contributors, ODbL 1.0). Built by
