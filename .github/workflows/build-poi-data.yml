@@ -27,11 +27,14 @@ jobs:
         run: curl -fL --retry 3 --retry-delay 30 -o germany.osm.pbf https://download.geofabrik.de/europe/germany-latest.osm.pbf
 
       - name: Filter relevant POIs (categories + every branded POI)
+        # nwr/shop keeps ALL shops, so future shop-based categories need no
+        # workflow change — compact.js decides which become shards.
         run: |
           osmium tags-filter -o filtered.osm.pbf germany.osm.pbf \
-            nwr/shop=chemist,perfumery,cosmetics,hairdresser,supermarket,electronics,clothes,mall,department_store \
-            nwr/amenity=pharmacy,university,college,cinema \
-            nwr/leisure=fitness_centre \
+            nwr/shop \
+            nwr/amenity=pharmacy,doctors,dentist,hospital,clinic,restaurant,fast_food,cafe,bar,pub,nightclub,fuel,charging_station,bank,post_office,cinema,theatre,university,college,school,kindergarten,casino,gambling \
+            nwr/leisure=fitness_centre,swimming_pool,water_park,stadium \
+            nwr/tourism=hotel,museum,zoo,theme_park \
             nwr/railway=station,halt \
             nwr/aeroway=aerodrome \
             nwr/brand

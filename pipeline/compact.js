@@ -15,24 +15,68 @@ const fs = require("fs");
 const readline = require("readline");
 const path = require("path");
 
+// {key, t: OSM tag key, v: accepted values} — MUST mirror CATEGORIES in
+// index.html (same keys, same tag mapping; labels live only in the app).
 const CATS = [
-  { key: "chemist",     test: t => t.shop === "chemist" },
-  { key: "perfumery",   test: t => t.shop === "perfumery" || t.shop === "cosmetics" },
-  { key: "pharmacy",    test: t => t.amenity === "pharmacy" },
-  { key: "hairdresser", test: t => t.shop === "hairdresser" },
-  { key: "supermarket", test: t => t.shop === "supermarket" },
-  { key: "electronics", test: t => t.shop === "electronics" },
-  { key: "clothes",     test: t => t.shop === "clothes" },
-  { key: "mall",        test: t => t.shop === "mall" || t.shop === "department_store" },
-  { key: "airport",     test: t => t.aeroway === "aerodrome" },
-  { key: "station",     test: t => t.railway === "station" || t.railway === "halt" },
-  { key: "gym",         test: t => t.leisure === "fitness_centre" },
-  { key: "university",  test: t => t.amenity === "university" || t.amenity === "college" },
-  { key: "cinema",      test: t => t.amenity === "cinema" }
+  { key: "chemist",      t: "shop",    v: ["chemist"] },
+  { key: "supermarket",  t: "shop",    v: ["supermarket"] },
+  { key: "convenience",  t: "shop",    v: ["convenience"] },
+  { key: "kiosk",        t: "shop",    v: ["kiosk"] },
+  { key: "bakery",       t: "shop",    v: ["bakery"] },
+  { key: "butcher",      t: "shop",    v: ["butcher"] },
+  { key: "beverages",    t: "shop",    v: ["beverages"] },
+  { key: "clothes",      t: "shop",    v: ["clothes"] },
+  { key: "shoes",        t: "shop",    v: ["shoes"] },
+  { key: "sports_shop",  t: "shop",    v: ["sports"] },
+  { key: "electronics",  t: "shop",    v: ["electronics"] },
+  { key: "mobile_phone", t: "shop",    v: ["mobile_phone"] },
+  { key: "furniture",    t: "shop",    v: ["furniture"] },
+  { key: "doityourself", t: "shop",    v: ["doityourself"] },
+  { key: "garden_centre",t: "shop",    v: ["garden_centre"] },
+  { key: "perfumery",    t: "shop",    v: ["perfumery", "cosmetics"] },
+  { key: "hairdresser",  t: "shop",    v: ["hairdresser"] },
+  { key: "beauty",       t: "shop",    v: ["beauty"] },
+  { key: "optician",     t: "shop",    v: ["optician"] },
+  { key: "jewelry",      t: "shop",    v: ["jewelry"] },
+  { key: "books",        t: "shop",    v: ["books"] },
+  { key: "toys",         t: "shop",    v: ["toys"] },
+  { key: "pet",          t: "shop",    v: ["pet"] },
+  { key: "bicycle",      t: "shop",    v: ["bicycle"] },
+  { key: "car_dealer",   t: "shop",    v: ["car"] },
+  { key: "mall",         t: "shop",    v: ["mall", "department_store"] },
+  { key: "pharmacy",     t: "amenity", v: ["pharmacy"] },
+  { key: "doctors",      t: "amenity", v: ["doctors"] },
+  { key: "dentist",      t: "amenity", v: ["dentist"] },
+  { key: "hospital",     t: "amenity", v: ["hospital", "clinic"] },
+  { key: "restaurant",   t: "amenity", v: ["restaurant"] },
+  { key: "fast_food",    t: "amenity", v: ["fast_food"] },
+  { key: "cafe",         t: "amenity", v: ["cafe"] },
+  { key: "bar",          t: "amenity", v: ["bar"] },
+  { key: "pub",          t: "amenity", v: ["pub"] },
+  { key: "nightclub",    t: "amenity", v: ["nightclub"] },
+  { key: "fuel",         t: "amenity", v: ["fuel"] },
+  { key: "charging",     t: "amenity", v: ["charging_station"] },
+  { key: "bank",         t: "amenity", v: ["bank"] },
+  { key: "post",         t: "amenity", v: ["post_office"] },
+  { key: "cinema",       t: "amenity", v: ["cinema"] },
+  { key: "theatre",      t: "amenity", v: ["theatre"] },
+  { key: "university",   t: "amenity", v: ["university", "college"] },
+  { key: "school",       t: "amenity", v: ["school"] },
+  { key: "kindergarten", t: "amenity", v: ["kindergarten"] },
+  { key: "casino",       t: "amenity", v: ["casino", "gambling"] },
+  { key: "gym",          t: "leisure", v: ["fitness_centre"] },
+  { key: "swimming",     t: "leisure", v: ["swimming_pool", "water_park"] },
+  { key: "stadium",      t: "leisure", v: ["stadium"] },
+  { key: "hotel",        t: "tourism", v: ["hotel"] },
+  { key: "museum",       t: "tourism", v: ["museum"] },
+  { key: "zoo",          t: "tourism", v: ["zoo"] },
+  { key: "theme_park",   t: "tourism", v: ["theme_park"] },
+  { key: "station",      t: "railway", v: ["station", "halt"] },
+  { key: "airport",      t: "aeroway", v: ["aerodrome"] }
 ];
 
 function catKey(tags) {
-  for (const c of CATS) if (c.test(tags)) return c.key;
+  for (const c of CATS) if (c.v.includes(tags[c.t])) return c.key;
   return null;
 }
 

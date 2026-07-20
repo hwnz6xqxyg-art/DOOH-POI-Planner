@@ -23,9 +23,10 @@ range: deduped, mapped, counted, and exportable.
 
 ## Features
 
-- **POI discovery via Overpass API** (3 public mirrors with automatic failover, 14-day
-  result cache): brand search with whole-word matching, category filters, Bundesland +
-  city scoping — combinable, precise AND semantics.
+- **POI discovery**: ~55 searchable categories (Drogerie … Tankstelle, Hotel, Stadion)
+  plus free brand search with whole-word matching, Bundesland + city scoping —
+  combinable, precise AND semantics. Served from the static dataset when available,
+  else via Overpass (4 public mirrors, automatic failover, 14-day cache).
 - **Inventory filters**: uploaded lists plus SSP / Publisher / Venue dimensions behind a
   segmented switcher; filters are faceted (each tab shows what remains under the other
   tabs' selections), with select-all/deselect-all and per-list provenance.
@@ -44,7 +45,7 @@ for — on busy days they queue or rate-limit. The repo therefore ships a data p
 that pre-builds the POI dataset, and **the app automatically prefers it**:
 
 - **One-time setup:** in the GitHub repo, open **Actions → "Build POI data" → Run
-  workflow**. It downloads the Geofabrik Germany extract, filters the app's categories
+  workflow**. It downloads the Geofabrik Germany extract, filters the app's ~55 categories
   plus every branded POI, and publishes compact JSON shards to the `poi-data` branch
   (~30–60 min). It then re-runs monthly by itself.
 - ⚠️ **The repo must be public** (or the data mirrored to a public repo): the app
@@ -56,9 +57,9 @@ that pre-builds the POI dataset, and **the app automatically prefers it**:
   version): repeat nationwide searches are instant and even work offline.
 - From then on, "Ganz Deutschland" searches load those shards in **seconds** — no rate
   limits, no queues — and show their `Datenstand` next to the result.
-- No setup / branch missing / offline? The app **falls back to live Overpass**
-  automatically. Bundesland/city/map-view searches always use live Overpass (they are
-  small and fast).
+- Bundesland-, Stadt- and map-view scopes use the dataset too (boundaries resolved
+  once via Nominatim, then filtered client-side). No setup / branch missing / offline?
+  The app **falls back to live Overpass** automatically for any scope.
 
 Data license is unchanged: © OpenStreetMap contributors, ODbL 1.0 (extract via
 [Geofabrik](https://download.geofabrik.de/), free incl. commercial use).

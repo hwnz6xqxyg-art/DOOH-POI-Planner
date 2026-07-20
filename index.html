@@ -1354,22 +1354,81 @@ function toast(m,k){var e=$("toast");e.textContent=m;e.className="toast "+(k||"o
 function setStatus(m){$("status").textContent=m;}
 
 // ---- categories (label -> Overpass tag filter) ----------------------------
+// Data-driven categories: {key, label, t: OSM tag key, v: accepted values}.
+// The Overpass filter (c.f) and the result classifier are DERIVED from t/v —
+// adding a category is one line here (+ the same line in pipeline/compact.js;
+// re-run the "Build POI data" workflow so its static shard exists).
+// The original 13 keys are stable, so already-published shards keep working.
 var CATEGORIES=[
- {key:"chemist",label:"Drogerie",f:'["shop"="chemist"]'},
- {key:"perfumery",label:"Parfümerie",f:'["shop"~"^(perfumery|cosmetics)$"]'},
- {key:"pharmacy",label:"Apotheke",f:'["amenity"="pharmacy"]'},
- {key:"hairdresser",label:"Friseure",f:'["shop"="hairdresser"]'},
- {key:"supermarket",label:"Supermarkt",f:'["shop"="supermarket"]'},
- {key:"electronics",label:"Elektronik",f:'["shop"="electronics"]'},
- {key:"clothes",label:"Mode",f:'["shop"="clothes"]'},
- {key:"mall",label:"Einkaufszentrum",f:'["shop"="mall"]'},
- {key:"airport",label:"Flughafen",f:'["aeroway"="aerodrome"]'},
- {key:"station",label:"Bahnhof",f:'["railway"="station"]'},
- {key:"gym",label:"Fitnessstudio",f:'["leisure"="fitness_centre"]'},
- {key:"university",label:"Universität",f:'["amenity"="university"]'},
- {key:"cinema",label:"Kino",f:'["amenity"="cinema"]'}
+ // Einzelhandel (shop)
+ {key:"chemist",label:"Drogerie",t:"shop",v:["chemist"]},
+ {key:"supermarket",label:"Supermarkt",t:"shop",v:["supermarket"]},
+ {key:"convenience",label:"Convenience/Nahversorger",t:"shop",v:["convenience"]},
+ {key:"kiosk",label:"Kiosk",t:"shop",v:["kiosk"]},
+ {key:"bakery",label:"Bäckerei",t:"shop",v:["bakery"]},
+ {key:"butcher",label:"Metzgerei",t:"shop",v:["butcher"]},
+ {key:"beverages",label:"Getränkemarkt",t:"shop",v:["beverages"]},
+ {key:"clothes",label:"Mode",t:"shop",v:["clothes"]},
+ {key:"shoes",label:"Schuhe",t:"shop",v:["shoes"]},
+ {key:"sports_shop",label:"Sportgeschäft",t:"shop",v:["sports"]},
+ {key:"electronics",label:"Elektronik",t:"shop",v:["electronics"]},
+ {key:"mobile_phone",label:"Mobilfunk",t:"shop",v:["mobile_phone"]},
+ {key:"furniture",label:"Möbelhaus",t:"shop",v:["furniture"]},
+ {key:"doityourself",label:"Baumarkt",t:"shop",v:["doityourself"]},
+ {key:"garden_centre",label:"Gartencenter",t:"shop",v:["garden_centre"]},
+ {key:"perfumery",label:"Parfümerie",t:"shop",v:["perfumery","cosmetics"]},
+ {key:"hairdresser",label:"Friseure",t:"shop",v:["hairdresser"]},
+ {key:"beauty",label:"Kosmetikstudio",t:"shop",v:["beauty"]},
+ {key:"optician",label:"Optiker",t:"shop",v:["optician"]},
+ {key:"jewelry",label:"Juwelier",t:"shop",v:["jewelry"]},
+ {key:"books",label:"Buchhandlung",t:"shop",v:["books"]},
+ {key:"toys",label:"Spielwaren",t:"shop",v:["toys"]},
+ {key:"pet",label:"Zoohandlung",t:"shop",v:["pet"]},
+ {key:"bicycle",label:"Fahrradladen",t:"shop",v:["bicycle"]},
+ {key:"car_dealer",label:"Autohaus",t:"shop",v:["car"]},
+ {key:"mall",label:"Einkaufszentrum",t:"shop",v:["mall","department_store"]},
+ // Gesundheit (amenity)
+ {key:"pharmacy",label:"Apotheke",t:"amenity",v:["pharmacy"]},
+ {key:"doctors",label:"Arztpraxis",t:"amenity",v:["doctors"]},
+ {key:"dentist",label:"Zahnarzt",t:"amenity",v:["dentist"]},
+ {key:"hospital",label:"Krankenhaus/Klinik",t:"amenity",v:["hospital","clinic"]},
+ // Gastronomie & Nachtleben (amenity)
+ {key:"restaurant",label:"Restaurant",t:"amenity",v:["restaurant"]},
+ {key:"fast_food",label:"Fast Food",t:"amenity",v:["fast_food"]},
+ {key:"cafe",label:"Café",t:"amenity",v:["cafe"]},
+ {key:"bar",label:"Bar",t:"amenity",v:["bar"]},
+ {key:"pub",label:"Kneipe",t:"amenity",v:["pub"]},
+ {key:"nightclub",label:"Club/Diskothek",t:"amenity",v:["nightclub"]},
+ // Mobilität & Services (amenity)
+ {key:"fuel",label:"Tankstelle",t:"amenity",v:["fuel"]},
+ {key:"charging",label:"E-Ladestation",t:"amenity",v:["charging_station"]},
+ {key:"bank",label:"Bank",t:"amenity",v:["bank"]},
+ {key:"post",label:"Postfiliale",t:"amenity",v:["post_office"]},
+ // Kultur, Bildung, Freizeit
+ {key:"cinema",label:"Kino",t:"amenity",v:["cinema"]},
+ {key:"theatre",label:"Theater",t:"amenity",v:["theatre"]},
+ {key:"university",label:"Universität",t:"amenity",v:["university","college"]},
+ {key:"school",label:"Schule",t:"amenity",v:["school"]},
+ {key:"kindergarten",label:"Kita",t:"amenity",v:["kindergarten"]},
+ {key:"casino",label:"Spielbank/Spielhalle",t:"amenity",v:["casino","gambling"]},
+ {key:"gym",label:"Fitnessstudio",t:"leisure",v:["fitness_centre"]},
+ {key:"swimming",label:"Schwimmbad",t:"leisure",v:["swimming_pool","water_park"]},
+ {key:"stadium",label:"Stadion",t:"leisure",v:["stadium"]},
+ {key:"hotel",label:"Hotel",t:"tourism",v:["hotel"]},
+ {key:"museum",label:"Museum",t:"tourism",v:["museum"]},
+ {key:"zoo",label:"Zoo",t:"tourism",v:["zoo"]},
+ {key:"theme_park",label:"Freizeitpark",t:"tourism",v:["theme_park"]},
+ // Verkehr
+ {key:"station",label:"Bahnhof",t:"railway",v:["station","halt"]},
+ {key:"airport",label:"Flughafen",t:"aeroway",v:["aerodrome"]}
 ];
+CATEGORIES.forEach(function(c){
+  c.f=c.v.length===1?'["'+c.t+'"="'+c.v[0]+'"]':'["'+c.t+'"~"^('+c.v.join("|")+')$"]';
+});
 var CATMAP={};CATEGORIES.forEach(function(c){CATMAP[c.key]=c;});
+// tag-key -> value -> category, for classifying results (replaces the if-chain)
+var TAG2CAT={};CATEGORIES.forEach(function(c){c.v.forEach(function(v){(TAG2CAT[c.t]||(TAG2CAT[c.t]={}))[v]=c;});});
+var TAG_ORDER=["shop","amenity","leisure","tourism","railway","aeroway"];
 
 // ---- state ----------------------------------------------------------------
 // brands: [{term, cat}] — cat is a CATEGORIES key, or "" for any category
@@ -1503,8 +1562,9 @@ function updateCatsCount(){
     :sel.length<=2?sel.map(function(c){return c.label;}).join(", ")
     :sel.length+" ausgewählt";
 }
+function catsSorted(){return CATEGORIES.slice().sort(function(a,b){return a.label.localeCompare(b.label,"de");});}
 function renderCats(){
-  $("cats").innerHTML=CATEGORIES.map(function(c){
+  $("cats").innerHTML=catsSorted().map(function(c){
     var on=!!State.cats[c.key];
     return '<label><input type="checkbox" data-k="'+c.key+'"'+(on?' checked':'')+'><span>'+esc(c.label)+'</span></label>';
   }).join("");
@@ -1516,7 +1576,7 @@ function renderCats(){
 // Category dropdown for the brand input ("in allen Kategorien" + one per category).
 function populateBrandCat(){
   $("brandCat").innerHTML='<option value="">in allen Kategorien</option>'+
-    CATEGORIES.map(function(c){return '<option value="'+c.key+'">nur '+esc(c.label)+'</option>';}).join("");
+    catsSorted().map(function(c){return '<option value="'+c.key+'">nur '+esc(c.label)+'</option>';}).join("");
 }
 function renderBrandChips(){
   $("brandChips").innerHTML="";
@@ -1628,17 +1688,8 @@ function fetchOverpass(q,idx,onMirror,eps,seq,round,onWait,busy){
    });
 }
 function classify(t){
-  if(t.aeroway==="aerodrome")return"Flughafen";
-  if(t.railway==="station"||t.railway==="halt")return"Bahnhof";
-  if(t.leisure==="fitness_centre")return"Fitnessstudio";
-  if(t.amenity==="university"||t.amenity==="college")return"Universität";
-  if(t.amenity==="cinema")return"Kino";
-  if(t.amenity==="pharmacy")return"Apotheke";
-  if(t.shop==="perfumery"||t.shop==="cosmetics")return"Parfümerie";
-  if(t.shop==="hairdresser")return"Friseure";
-  if(t.shop==="chemist")return"Drogerie";if(t.shop==="supermarket")return"Supermarkt";
-  if(t.shop==="electronics")return"Elektronik";if(t.shop==="clothes")return"Mode";
-  if(t.shop==="mall"||t.shop==="department_store")return"Einkaufszentrum";
+  for(var i=0;i<TAG_ORDER.length;i++){var k=TAG_ORDER[i],val=t[k];
+    if(val&&TAG2CAT[k]&&TAG2CAT[k][val])return TAG2CAT[k][val].label;}
   return t.shop||t.amenity||t.leisure||"POI";
 }
 // Geographic scope: bbox (map view) or admin areas (Bundesland AND city).
