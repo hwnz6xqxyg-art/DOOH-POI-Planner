@@ -63,6 +63,24 @@ that pre-builds the POI dataset, and **the app automatically prefers it**:
 Data license is unchanged: © OpenStreetMap contributors, ODbL 1.0 (extract via
 [Geofabrik](https://download.geofabrik.de/), free incl. commercial use).
 
+## Hosten auf GitHub Pages (optional)
+
+The single file works double-clicked — but once the repo is public you can also serve
+it as a website, so colleagues just open a link and always get the latest version:
+
+1. Repo **Settings → Pages → Source: "Deploy from a branch"** → Branch **`main`**,
+   folder **`/ (root)`** → Save.
+2. After ~1 minute the app is live at `https://<owner>.github.io/<repo>/`
+   (Pages serves `index.html` automatically).
+
+Notes:
+
+- The Pages URL is a different browser "origin" than your local file — anyone
+  switching over uploads their inventory once; from then on it persists reliably
+  (hosted origins have first-class browser storage, unlike some `file://` setups).
+- Local double-click use keeps working in parallel; both share nothing.
+- Merge your working branch into `main` whenever you want the hosted version updated.
+
 ## Lizenz & Attribution
 
 **Free for commercial use.** The code is **MIT-licensed** ([`LICENSE`](./LICENSE)); every
