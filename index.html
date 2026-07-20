@@ -720,7 +720,11 @@ input[type=text]:focus{border-color:var(--accent)}
 .btn{padding:8px 12px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;cursor:pointer;font-size:13px}
 .btn:hover{border-color:var(--accent)}.btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.sm{padding:6px 9px;font-size:12px}.btn.full{width:100%}.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:600}.btn.primary:hover{border-color:var(--accent)}.btn.ghost{background:transparent}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.chip{background:var(--accent);color:var(--on-accent);border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer}.chip::after{content:" ✕";opacity:.8}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent);color:var(--on-accent);border-radius:12px;padding:3px 6px 3px 10px;font-size:12px}
+.chip button{background:none;border:none;color:var(--on-accent);cursor:pointer;font-size:12px;padding:0 2px}
+.chip .ch-cat{opacity:.75;white-space:nowrap}.chip .ch-cat:hover{opacity:1;text-decoration:underline}
+.chip .ch-x{opacity:.8;font-size:11px}.chip .ch-x:hover{opacity:1}
 .catdrop{position:relative}
 .catdrop-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);cursor:pointer;font-size:13px;text-align:left}
 .catdrop-btn:hover{border-color:var(--accent)}.catdrop-btn .caret{color:var(--muted);font-size:11px;flex:0 0 auto}
@@ -731,7 +735,6 @@ input[type=text]:focus{border-color:var(--accent)}
 .cats{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
 .cats label{display:flex;align-items:center;gap:7px;padding:3px 0;cursor:pointer}.cats input{accent-color:var(--accent)}
 .selin{padding:8px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);outline:none}.selin:focus{border-color:var(--accent)}
-.chip .ch-cat{opacity:.8}
 .seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;margin-top:8px}
 .seg button{flex:1;min-width:0;border:none;background:transparent;border-radius:7px;padding:5px 4px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .seg button.active{background:var(--panel);color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.18)}
@@ -789,13 +792,17 @@ input[type=text]:focus{border-color:var(--accent)}
     <div class="sub">Karte auf das Zielgebiet zoomen, dann suchen.</div>
     <div class="block">
       <label class="lbl">Marke suchen</label>
-      <input id="brandInput" type="text" placeholder="z. B. Rossmann" />
-      <div class="row" style="margin-top:6px;flex-wrap:nowrap">
-        <select id="brandCat" class="selin" style="flex:1;min-width:0"></select>
+      <div class="row" style="flex-wrap:nowrap;position:relative" id="brandBlock">
+        <input id="brandInput" type="text" placeholder="z. B. Rossmann" style="flex:1;min-width:0" />
         <button id="brandAdd" class="btn sm" style="flex:0 0 auto">+ hinzufügen</button>
       </div>
-      <div id="brandChips" class="chips"></div>
-      <div class="hint"><b>Marke</b> eintragen, optional eine <b>Kategorie für diese Marke</b> wählen (Standard: alle), dann „+". Beispiel: <b>DM · nur Drogerie</b>. <b>Kategorien</b> unten (Häkchen) = alle Filialen dieser Art. So holst du z. B. <b>DM (nur Drogerie) + Häkchen bei Apotheke</b> = nur DM-Drogerien + alle Apotheken.</div>
+      <div id="brandChips" class="chips" style="position:relative">
+        <div id="chipCatPanel" class="catdrop-panel hidden">
+          <input id="chipCatFilter" type="text" placeholder="Kategorie suchen …" autocomplete="off" />
+          <div id="chipCatList" class="cats" style="max-height:220px;overflow-y:auto;margin-top:6px"></div>
+        </div>
+      </div>
+      <div class="hint"><b>Marke</b> eintragen, „+", fertig — die Marke gilt erst mal <b>überall</b>. Zum Eingrenzen auf dem Chip auf <b>„· überall ▾"</b> klicken und eine Kategorie wählen (jederzeit änderbar). Beispiel: <b>DM · Drogerie + Häkchen bei Apotheke</b> = nur DM-Drogerien + alle Apotheken.</div>
     </div>
     <div class="block">
       <label class="lbl">Kategorien <span style="text-transform:none;color:var(--muted)">(= alle Filialen dieser Art)</span></label>
@@ -1573,20 +1580,48 @@ function renderCats(){
   });
   updateCatsCount();
 }
-// Category dropdown for the brand input ("in allen Kategorien" + one per category).
-function populateBrandCat(){
-  $("brandCat").innerHTML='<option value="">in allen Kategorien</option>'+
-    catsSorted().map(function(c){return '<option value="'+c.key+'">nur '+esc(c.label)+'</option>';}).join("");
-}
+// Brand chips carry their category binding: "· überall ▾" (any category) or
+// "· Drogerie ▾"; the badge opens a searchable picker and the binding can be
+// changed anytime. ✕ removes the chip. The shared picker panel (#chipCatPanel)
+// lives inside #brandChips, so chips are rebuilt around it, never over it.
 function renderBrandChips(){
-  $("brandChips").innerHTML="";
+  var box=$("brandChips"),panel=$("chipCatPanel");
+  Array.prototype.forEach.call(box.querySelectorAll(".chip"),function(n){n.remove();});
   State.brands.forEach(function(b,i){
-    var c=document.createElement("span");c.className="chip";c.title="entfernen";
-    var cl=b.cat&&CATMAP[b.cat]?CATMAP[b.cat].label:"";
-    c.innerHTML=esc(b.term)+(cl?' <span class="ch-cat">· '+esc(cl)+'</span>':'');
-    c.onclick=function(){State.brands.splice(i,1);renderBrandChips();};
-    $("brandChips").appendChild(c);
+    var c=document.createElement("span");c.className="chip";
+    var cl=b.cat&&CATMAP[b.cat]?CATMAP[b.cat].label:"überall";
+    c.innerHTML='<span class="ch-term">'+esc(b.term)+'</span>'
+      +'<button type="button" class="ch-cat" title="Kategorie für diese Marke wählen">· '+esc(cl)+' ▾</button>'
+      +'<button type="button" class="ch-x" title="entfernen">✕</button>';
+    c.querySelector(".ch-cat").addEventListener("click",function(e){e.stopPropagation();openChipCat(i);});
+    c.querySelector(".ch-x").addEventListener("click",function(e){e.stopPropagation();closeChipCat();State.brands.splice(i,1);renderBrandChips();});
+    box.insertBefore(c,panel);
   });
+}
+var chipCatIdx=-1;
+function closeChipCat(){$("chipCatPanel").classList.add("hidden");chipCatIdx=-1;}
+function chipCatApplyFilter(){
+  var q=$("chipCatFilter").value.trim().toLowerCase();
+  Array.prototype.forEach.call($("chipCatList").querySelectorAll("label"),function(l){
+    l.style.display=(!q||l.textContent.toLowerCase().indexOf(q)>=0)?"":"none";});
+}
+function openChipCat(i){
+  chipCatIdx=i;
+  $("catPanel").classList.add("hidden");        // only one panel open at a time
+  var cur=State.brands[i]?State.brands[i].cat:"";
+  var items=[{key:"",label:"in allen Kategorien"}].concat(catsSorted().map(function(c){return {key:c.key,label:"nur "+c.label};}));
+  $("chipCatList").innerHTML=items.map(function(it){
+    return '<label data-k="'+it.key+'"'+(it.key===cur?' style="font-weight:600;color:var(--accent)"':'')+'><span>'+esc(it.label)+'</span></label>';
+  }).join("");
+  Array.prototype.forEach.call($("chipCatList").querySelectorAll("label"),function(l){
+    l.addEventListener("click",function(){
+      if(State.brands[chipCatIdx])State.brands[chipCatIdx].cat=l.getAttribute("data-k");
+      closeChipCat();renderBrandChips();
+    });
+  });
+  $("chipCatFilter").value="";chipCatApplyFilter();
+  $("chipCatPanel").classList.remove("hidden");
+  try{$("chipCatFilter").focus();}catch(e){}
 }
 
 // ---- Overpass discovery ---------------------------------------------------
@@ -2516,7 +2551,7 @@ function wire(){
   $("globalRadius").addEventListener("input",function(e){setRadius(radiusFromPos(+e.target.value),true);});
   Array.prototype.forEach.call($("radiusPresets").children,function(b){b.addEventListener("click",function(){setRadius(+b.getAttribute("data-r"),false);});});
   setRadius(State.globalRadius,false);          // init slider position + preset highlight
-  $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push({term:v,cat:$("brandCat").value});$("brandInput").value="";$("brandInput").focus();renderBrandChips();}});
+  $("brandAdd").addEventListener("click",function(){var v=$("brandInput").value.trim();if(v){State.brands.push({term:v,cat:""});$("brandInput").value="";$("brandInput").focus();renderBrandChips();}});
   $("brandInput").addEventListener("keydown",function(e){if(e.key==="Enter"){$("brandAdd").click();}});
   $("searchBtn").addEventListener("click",searchPois);
   $("selectAll").addEventListener("click",function(){State.pois.forEach(function(p){if(!State.anchors[p.id])State.anchors[p.id]={radius:null,p:p};});for(var id in poiMk)poiMk[id].setStyle(POI_ANCHOR);drawCircles();scheduleMatch();refreshButtons();});
@@ -2538,7 +2573,7 @@ function wire(){
   // category dropdown: Gebiet-style trigger, free-text filter, bulk actions
   var catDrop=$("catDrop"),catPanel=$("catPanel"),catFilter=$("catFilter");
   function catOpen(o){catPanel.classList.toggle("hidden",!o);
-    if(o){catFilter.value="";catApplyFilter();try{catFilter.focus();}catch(e){}}}
+    if(o){closeChipCat();catFilter.value="";catApplyFilter();try{catFilter.focus();}catch(e){}}}
   function catApplyFilter(){var q=catFilter.value.trim().toLowerCase();
     Array.prototype.forEach.call($("cats").querySelectorAll("label"),function(l){
       l.style.display=(!q||l.textContent.toLowerCase().indexOf(q)>=0)?"":"none";});}
@@ -2550,6 +2585,11 @@ function wire(){
   document.addEventListener("click",function(e){if(!catDrop.contains(e.target))catOpen(false);});
   document.addEventListener("keydown",function(e){if(e.key==="Escape")catOpen(false);});
   catFilter.addEventListener("input",catApplyFilter);
+  // chip category picker: outside click / Escape close, filter narrows
+  document.addEventListener("click",function(e){var p=$("chipCatPanel");
+    if(!p.classList.contains("hidden")&&!p.contains(e.target)&&!e.target.closest(".ch-cat"))closeChipCat();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeChipCat();});
+  $("chipCatFilter").addEventListener("input",chipCatApplyFilter);
   $("catSelAll").addEventListener("click",function(){catBulk(true);});
   $("catDeselAll").addEventListener("click",function(){catBulk(false);});
   $("licBtn").addEventListener("click",function(){$("licModal").classList.remove("hidden");});
@@ -2558,7 +2598,7 @@ function wire(){
 }
 
 // ---- init -----------------------------------------------------------------
-renderCats();populateBrandCat();wire();
+renderCats();wire();
 idbLoad().then(function(){renderPartners();renderScreens();doMatch();});
 idbPruneCache();          // trim expired / stale POI-cache entries on startup
 })();
