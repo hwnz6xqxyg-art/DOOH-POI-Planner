@@ -47,6 +47,13 @@ that pre-builds the POI dataset, and **the app automatically prefers it**:
   workflow**. It downloads the Geofabrik Germany extract, filters the app's categories
   plus every branded POI, and publishes compact JSON shards to the `poi-data` branch
   (~30–60 min). It then re-runs monthly by itself.
+- ⚠️ **The repo must be public** (or the data mirrored to a public repo): the app
+  fetches the shards anonymously via `raw.githubusercontent.com`, which serves public
+  repos only. On a private repo the app tells you and falls back to live Overpass.
+  The app itself still runs locally either way — nothing needs to be "hosted"; GitHub
+  only serves the data files.
+- After the first load the shards are **cached in the browser** (keyed by dataset
+  version): repeat nationwide searches are instant and even work offline.
 - From then on, "Ganz Deutschland" searches load those shards in **seconds** — no rate
   limits, no queues — and show their `Datenstand` next to the result.
 - No setup / branch missing / offline? The app **falls back to live Overpass**

@@ -1719,25 +1719,66 @@ var BUNDESLAENDER=["Baden-Württemberg","Bayern","Berlin","Brandenburg","Bremen"
 // POI). Loading a few static files replaces the heaviest Overpass queries —
 // no rate limits, seconds instead of minutes. Overpass stays as fallback when
 // the dataset is missing (Action never run) or unreachable.
+// NOTE: raw.githubusercontent.com serves PUBLIC repos only — on a private repo
+// this 404s and the app falls back to Overpass (it says so via toast). The
+// relative "poi-data/" base comes first so a hosted copy of the app can carry
+// its data alongside (it fails instantly for file:// and costs nothing).
 var POI_DATA_BASE="https://raw.githubusercontent.com/hwnz6xqxyg-art/DOOH-POI-Planner/poi-data/";
-function fetchStatic(name){
+var POI_DATA_BASES=["poi-data/",POI_DATA_BASE];
+var staticBase=null;                     // resolved once, remembered per session
+function fetchStaticFrom(base,name){
   var ctl=(typeof AbortController!=="undefined")?new AbortController():null;
   var tm=ctl?setTimeout(function(){ctl.abort();},25000):null;
-  return fetch(POI_DATA_BASE+name,{signal:ctl?ctl.signal:undefined})
-    .then(function(r){if(tm)clearTimeout(tm);if(!r.ok)return null;return r.json();})
-    .catch(function(){if(tm)clearTimeout(tm);return null;});
+  try{
+    return fetch(base+name,{signal:ctl?ctl.signal:undefined})
+      .then(function(r){if(tm)clearTimeout(tm);if(!r.ok)return null;return r.json();})
+      .catch(function(){if(tm)clearTimeout(tm);return null;});
+  }catch(e){if(tm)clearTimeout(tm);return Promise.resolve(null);}
+}
+// Shards are cached in IndexedDB keyed by the dataset's "generated" stamp:
+// after the first load a nationwide search costs one tiny manifest fetch (or
+// nothing when offline) — no MB re-downloads, instant repeats.
+function idbStaticGet(name){return idbCacheGet("static::"+name).then(function(rec){return rec||null;});}
+function idbStaticPut(name,data,gen){idbOpen().then(function(db){try{db.transaction(CACHE,"readwrite").objectStore(CACHE).put({q:"static::"+name,data:data,gen:gen,ts:Date.now()});}catch(e){}}).catch(function(){});}
+function staticManifest(){
+  var tryBase=function(i){
+    if(i>=POI_DATA_BASES.length)return Promise.resolve(null);
+    return fetchStaticFrom(POI_DATA_BASES[i],"manifest.json").then(function(man){
+      if(man){staticBase=POI_DATA_BASES[i];return man;}
+      return tryBase(i+1);
+    });
+  };
+  var first=staticBase?fetchStaticFrom(staticBase,"manifest.json"):Promise.resolve(null);
+  return first.then(function(man){
+    if(man)return man;
+    staticBase=null;return tryBase(0);
+  }).then(function(man){
+    if(man){idbStaticPut("manifest",man,man.generated);return man;}
+    // network unreachable: fall back to the cached manifest (offline mode)
+    return idbStaticGet("manifest").then(function(rec){return rec&&rec.data&&(Date.now()-rec.ts)<POI_TTL?rec.data:null;});
+  });
+}
+function staticShard(name,gen){
+  return idbStaticGet(name).then(function(rec){
+    if(rec&&rec.gen===gen&&rec.data)return rec.data;              // current version cached
+    if(!staticBase)return rec&&rec.data&&(Date.now()-rec.ts)<POI_TTL?rec.data:null;  // offline: stale ok
+    return fetchStaticFrom(staticBase,name).then(function(rows){
+      if(rows){idbStaticPut(name,rows,gen);return rows;}
+      return rec&&rec.data&&(Date.now()-rec.ts)<POI_TTL?rec.data:null;
+    });
+  });
 }
 // Resolve the current filters against the static shards. Same semantics as the
 // live path: ticked category = ALL of it; brand chip = whole-word brand match,
 // optionally narrowed to its category. Returns {pois,generated} or null when
 // the dataset is unavailable (callers then fall back to Overpass).
 function tryStaticNationwide(){
-  return fetchStatic("manifest.json").then(function(man){
+  return staticManifest().then(function(man){
     if(!man)return null;
     var catKeys=CATEGORIES.filter(function(c){return State.cats[c.key];}).map(function(c){return c.key;});
     var chips=State.brands;
-    var loads=catKeys.map(function(k){return fetchStatic("cat-"+k+".json").then(function(rows){return rows&&{kind:"cat",key:k,rows:rows};});});
-    if(chips.length)loads.push(fetchStatic("brands.json").then(function(rows){return rows&&{kind:"brands",rows:rows};}));
+    var loads=catKeys.map(function(k){return staticShard("cat-"+k+".json",man.generated).then(function(rows){return rows&&{kind:"cat",key:k,rows:rows};});});
+    if(chips.length)loads.push(staticShard("brands.json",man.generated).then(function(rows){return rows&&{kind:"brands",rows:rows};}));
     return Promise.all(loads).then(function(results){
       if(results.some(function(r){return !r;}))return null;    // a shard failed -> Overpass fallback
       var seen={},pois=[];
@@ -1828,6 +1869,8 @@ function searchPois(){
       if(r&&r.pois){done();applyPois(r.pois,scope,false);
         if(r.generated)el.textContent+=" · Datenstand "+r.generated;
         return;}
+      // Say WHY it's about to be slow — a silent fallback reads as "broken".
+      toast("POI-Datenpaket nicht erreichbar (Repo privat? Workflow noch nicht gelaufen?) – nutze Overpass-Server, das dauert länger.","warn");
       phase="";runOverpass();
     });
   }else runOverpass();
