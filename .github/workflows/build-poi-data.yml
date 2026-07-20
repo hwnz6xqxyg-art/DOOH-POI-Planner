@@ -9,6 +9,11 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 3 3 * *"   # 03:17 UTC on the 3rd of every month
+  push:                     # rebuild automatically when the pipeline changes
+    branches: [main, claude/dooh-osm-poi-connector-4fejgd]
+    paths:
+      - "pipeline/**"
+      - ".github/workflows/build-poi-data.yml"
 
 permissions:
   contents: write
